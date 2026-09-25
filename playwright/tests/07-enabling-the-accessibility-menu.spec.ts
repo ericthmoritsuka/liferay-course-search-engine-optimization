@@ -11,7 +11,13 @@
 import {test} from '@playwright/test';
 
 import {fill, openMenu, press} from '../helpers/liferay';
+import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
+
+//
+// The style guide's display width, captured at twice it.
+//
+test.use(CAPTURE);
 
 test('Enabling the Accessibility Menu', async ({page}) => {
 	await signIn(page, 'admin');
@@ -24,6 +30,8 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 	await press(page, 'Enable Accessibility Menu');
 	await press(page, 'Update');
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/08.png'});
+
 	// Step 3. Go to the *Home* page.
 	// Not performed: no control or value named in this step.
 
@@ -33,7 +41,11 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 	// Step 5. Once the "Open Accessibility Menu" button appears, hit Enter or click it.
 	// Not performed: no control or value named in this step.
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/09.png'});
+
 	// Step 6. Enable some of the options, close the menu, and verify the changes on the page.
 	// Not performed: no control or value named in this step.
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/10.png'});
 
 });

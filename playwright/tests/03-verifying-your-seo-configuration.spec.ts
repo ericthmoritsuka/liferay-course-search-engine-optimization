@@ -11,7 +11,13 @@
 import {test} from '@playwright/test';
 
 import {fill, openMenu, press} from '../helpers/liferay';
+import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
+
+//
+// The style guide's display width, captured at twice it.
+//
+test.use(CAPTURE);
 
 test('Verifying Your SEO Configuration', async ({page}) => {
 	await signIn(page, 'admin');
@@ -25,16 +31,26 @@ test('Verifying Your SEO Configuration', async ({page}) => {
 	// Step 3. Right mouse click on the page and select *Inspect*.
 	await press(page, 'Inspect');
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/06.png'});
+
 	// Step 4. Use the browser's developer tools to expand the `<head>` tag and the `<title>` tag.
 	// Not performed: no control or value named in this step.
 
 	// Step 5. Verify the correct values appear for the title and meta tags.
 	// Not performed: no control or value named in this step.
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/07.png'});
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/08.png'});
+
 	// Step 6. Verify the canonical `<link>` tags appear.
 	// Not performed: no control or value named in this step.
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/09.png'});
+
 	// Step 7. Verify the Open Graph and custom `<meta>` tags appear.
 	// Not performed: no control or value named in this step.
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/10.png'});
 
 });

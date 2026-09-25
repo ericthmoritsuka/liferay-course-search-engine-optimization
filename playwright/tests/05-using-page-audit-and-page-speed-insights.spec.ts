@@ -11,7 +11,13 @@
 import {test} from '@playwright/test';
 
 import {fill, openMenu, press} from '../helpers/liferay';
+import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
+
+//
+// The style guide's display width, captured at twice it.
+//
+test.use(CAPTURE);
 
 test('Using Page Audit and Page Speed Insights', async ({page}) => {
 	await signIn(page, 'admin');
@@ -25,10 +31,14 @@ test('Using Page Audit and Page Speed Insights', async ({page}) => {
 	// Step 3. Click Page Audit (![Page Audit](../../images/icon-page-audit-tool.png)) in the Application Bar.
 	// Not performed: no control or value named in this step.
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/01.png'});
+
 	// Step 4. In the Performance tab, review all load times and mouse over each element to highlight it in the page.
 	// Not performed: no control or value named in this step.
 
 	// Step 5. Go to the *PageSpeed Insights* tab.
 	// Not performed: no control or value named in this step.
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/02.png'});
 
 });

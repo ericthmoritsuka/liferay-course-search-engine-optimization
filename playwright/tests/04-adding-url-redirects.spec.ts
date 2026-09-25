@@ -11,7 +11,13 @@
 import {test} from '@playwright/test';
 
 import {fill, openMenu, press} from '../helpers/liferay';
+import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
+
+//
+// The style guide's display width, captured at twice it.
+//
+test.use(CAPTURE);
 
 test('Adding URL Redirects', async ({page}) => {
 	await signIn(page, 'admin');
@@ -27,6 +33,8 @@ test('Adding URL Redirects', async ({page}) => {
 	await press(page, 'Enabled');
 	await press(page, 'Save');
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/11.png'});
+
 	// Step 4. Return to *Clarity Public Enterprise Website*.
 	// Not performed: no control or value named in this step.
 
@@ -39,12 +47,18 @@ test('Adding URL Redirects', async ({page}) => {
 	// Step 7. Open a new browser and go to [http://localhost:8080/web/clarity/qualitysunglasses](http://localhost:8080/web/c
 	// Not performed: no control or value named in this step.
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/12.png'});
+
 	// Step 8. Return to your previous browser window and refresh the page.
 	// Not performed: no control or value named in this step.
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/13.png'});
 
 	// Step 9. Click *Actions* (![](../../images/icon-actions.png)) for the entry and select *Create Redirect*.
 	await press(page, 'Actions');
 	await press(page, 'Create Redirect');
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/14.png'});
 
 	// Step 10. For Destination URL, enter `http://localhost:8080/web/clarity/quality-sunglasses`.
 	await fill(page, 'Destination URL', 'http://localhost:8080/web/clarity/quality-sunglasses');
@@ -52,13 +66,19 @@ test('Adding URL Redirects', async ({page}) => {
 	// Step 11. For Type, select *Permanent (301)*.
 	await press(page, 'Permanent (301)');
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/15.png'});
+
 	// Step 12. Click *Create*.
 	await press(page, 'Create');
 
 	// Step 13. Go to the *Aliases* tab and confirm the redirect appears.
 	// Not performed: no control or value named in this step.
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/16.png'});
+
 	// Step 14. Go to [http://localhost:8080/web/clarity/qualitysunglasses](http://localhost:8080/web/clarity/qualitysunglasse
 	// Not performed: no control or value named in this step.
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/17.png'});
 
 });

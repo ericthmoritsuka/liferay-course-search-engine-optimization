@@ -11,7 +11,13 @@
 import {test} from '@playwright/test';
 
 import {fill, openMenu, press} from '../helpers/liferay';
+import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
+
+//
+// The style guide's display width, captured at twice it.
+//
+test.use(CAPTURE);
 
 test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	await signIn(page, 'admin');
@@ -27,9 +33,13 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	await press(page, 'Primary Master Page');
 	await press(page, 'Add');
 
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/01.png'});
+
 	// Step 4. Click *Actions* (![](../../images/icon-actions.png)) in the Application Bar and select *Configure*.
 	await press(page, 'Actions');
 	await press(page, 'Configure');
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/02.png'});
 
 	// Step 5. In the General tab, click the *Language* button for Name, select *es-ES*, and set these values:
 	await press(page, 'Language');
@@ -40,6 +50,8 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 
 	// Step 7. Go to the *SEO* tab and set these values:
 	// Not performed: no control or value named in this step.
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/03.png'});
 
 	// Step 8. Keep the other default values and click *Save*.
 	await press(page, 'Save');
