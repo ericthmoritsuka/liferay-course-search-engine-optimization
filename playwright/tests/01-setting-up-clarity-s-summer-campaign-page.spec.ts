@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {fill, openMenu, press} from '../helpers/liferay';
+import {fill, openMenu, openPageSettings, press} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -31,6 +31,7 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	// Step 3. Click *New*, select *Primary Master Page*, enter `Quality Sunglasses` for name, and click *Add*.
 	await press(page, 'New');
 	await press(page, 'Primary Master Page');
+	await fill(page, 'name', 'Quality Sunglasses');
 	await press(page, 'Add');
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/01.png'});

@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {fill, openMenu, press} from '../helpers/liferay';
+import {fill, openMenu, openPageSettings, press} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -21,6 +21,12 @@ test.use(CAPTURE);
 
 test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 	await signIn(page, 'admin');
+
+	//
+	// This exercise continues from the one before it, which left a
+	// screen open that a fresh browser does not have.
+	//
+	await openPageSettings(page, 'Quality Sunglasses');
 
 	// Step 1. While configuring the Quality Sunglasses page, go to the *Open Graph* tab.
 	await press(page, 'Open Graph');

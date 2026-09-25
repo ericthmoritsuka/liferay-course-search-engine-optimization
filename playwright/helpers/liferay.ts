@@ -208,6 +208,27 @@ async function chooseLanguage(page: Page, language: string) {
 }
 
 /**
+ * Reach a page's configuration, for an exercise that continues from another.
+ *
+ * A lesson splits a long procedure across exercises and resumes with "While
+ * configuring the Quality Sunglasses page, go to the Open Graph tab". A
+ * reader still has that screen open; a test does not, because each one starts
+ * in a fresh browser. Without this the exercise fails on its first step
+ * looking for a tab that is nowhere on the home page - which reads as a
+ * missing control rather than as a missing starting point.
+ *
+ * This is the route a reader takes to get back: the Pages application, the
+ * page's own Actions, then Configure.
+ */
+export async function openPageSettings(page: Page, name: string) {
+	await openMenu(page, 'Site Menu', 'Site Builder', 'Pages');
+
+	await press(page, 'Actions', name);
+
+	await press(page, 'Configure');
+}
+
+/**
  * Drag one thing onto another, as a page-editor step describes.
  *
  * Playwright's dragTo() dispatches HTML5 drag events, which Liferay's page
