@@ -14,19 +14,50 @@ import {expect, Frame, Locator, Page} from '@playwright/test';
  * bundle to globalMenu. A test pinned to either reports the other release as
  * a product with no menus at all.
  */
+//
+// How to open each menu, across DXP versions.
+//
+// The trigger is not the same from one release to the next: on 2026.q3 the
+// Applications Menu button announces itself as "Open Applications Menu",
+// while on 2026.q1 LTS it carries no aria-label at all - only
+// data-qa-id="applicationsMenu". A course workspace pins its own release, so
+// both have to work or a suite passes on one bundle and cannot find the menu
+// on another.
+//
+// data-qa-id is the stable anchor and is listed first for that reason; the
+// aria-labels follow as a fallback for builds that lack it.
+//
 const MENUS: Record<string, {root: string; trigger: string}> = {
 	'Global Menu': {
-		root: '.dropdown-menu.show',
+		//
+		// And it is not the same kind of thing either: on 2026.q1 LTS this
+		// menu is a modal (.applications-menu-modal), on 2026.q3 a dropdown
+		// (.global-menu). A root matching only one means the menu opens and
+		// the code concludes it did not.
+		//
+		root:
+			'.applications-menu-modal.show, .applications-menu-wrapper, ' +
+			'.global-menu, .dropdown-menu.show',
 		trigger:
-			'[data-qa-id="globalMenu"], [data-testid="globalMenu"], ' +
-			'[aria-label="Open Applications Menu"]',
+			'[data-qa-id="applicationsMenu"], [data-qa-id="globalMenu"], ' +
+			'[data-testid="globalMenu"], ' +
+			'[aria-label="Open Applications Menu"], ' +
+			'[aria-label="Applications Menu"]',
 	},
 	'Site Menu': {
+		//
+		// Left as the dropdown alone. Adding the q1 sidebar class here made
+		// this match a panel that is always present, so the code believed a
+		// menu was standing over every screen - and Enabling the
+		// Accessibility Menu, which had been passing, stopped being able to
+		// click anything. Verified by reverting this line alone.
+		//
 		root: '.product-menu',
 		trigger:
 			'[data-qa-id="productMenu"], ' +
 			'[data-qa-id="sideNavigationToggler"], ' +
-			'[aria-label="Open Product Menu"]',
+			'[aria-label="Open Product Menu"], ' +
+			'[aria-label="Toggle Product Menu"]',
 	},
 };
 
@@ -763,7 +794,27 @@ export async function press(page: Page, label: string, within?: string) {
 			await control.click({timeout: 4000});
 		}
 		catch (error) {
-			continue;
+			//
+			// A menu left standing over the control is the usual reason a
+			// click cannot land. Opening the Site Menu to reach an
+			// application leaves its panel covering the screen the
+			// application rendered, so the very next step is blocked by the
+			// menu that got it there.
+			//
+			// Closing it is what a reader does without noticing, and it is
+			// done only after a click has actually failed - pressing Escape
+			// at every step would shut the form the previous step opened.
+			//
+			if (!(await closeOpenMenus(page))) {
+				continue;
+			}
+
+			try {
+				await control.click({timeout: 4000});
+			}
+			catch (again) {
+				continue;
+			}
 		}
 
 		//
@@ -963,6 +1014,33 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 	}
 
 	return null;
+}
+
+/** Close any menu panel standing over the screen. True if one was closed. */
+async function closeOpenMenus(page: Page): Promise<boolean> {
+	let closed = false;
+
+	for (const menu of Object.values(MENUS)) {
+		const panel = page.locator(menu.root).first();
+
+		if (!(await panel.isVisible().catch(() => false))) {
+			continue;
+		}
+
+		await page
+			.locator(menu.trigger)
+			.first()
+			.click({timeout: 3000})
+			.catch(() => undefined);
+
+		await panel
+			.waitFor({state: 'hidden', timeout: 3000})
+			.catch(() => undefined);
+
+		closed = true;
+	}
+
+	return closed;
 }
 
 /** The address plus the shape of the visible text, as a cheap fingerprint. */
