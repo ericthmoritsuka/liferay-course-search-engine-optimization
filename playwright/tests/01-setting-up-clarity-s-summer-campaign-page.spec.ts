@@ -44,14 +44,19 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	// Step 5. In the General tab, click the *Language* button for Name, select *es-ES*, and set these values:
 	await press(page, 'Language');
 	await press(page, 'es-ES');
-	// Not entered: Basic Info > Name, URL > Friendly URL - inside a panel or a language this cannot address yet.
+	await fill(page, 'Name', 'Gafas de sol de calidad', {language: 'Spanish', section: 'Basic Info'});
+	await fill(page, 'Friendly URL', '/gafas-sol-calidad', {language: 'Spanish', section: 'URL'});
 
 	// Step 6. Click *Save*.
 	await press(page, 'Save');
 
 	// Step 7. Go to the *SEO* tab and set these values:
 	await press(page, 'SEO');
-	// Not entered: Settings > HTML Title, Settings > Description, Settings > Keywords - inside a panel or a language this cannot address yet.
+	await fill(page, 'HTML Title', 'Quality sunglasses for men and women, aviator, wayfarer and cat-eye', {language: 'English', section: 'Settings'});
+	await fill(page, 'HTML Title', 'Gafas de sol de calidad para hombre y mujer, aviador, wayfarer y cat-eye', {language: 'Spanish', section: 'Settings'});
+	await fill(page, 'Keywords', 'quality sunglasess, aviator, wayfarer, cat-eye ', {language: 'English', section: 'Settings'});
+	await fill(page, 'Keywords', 'gafas de sol de calidad, aviador, wayfarer, cat-eye', {language: 'Spanish', section: 'Settings'});
+	// Not entered: Settings > Description - chosen from a control rather than typed.
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/03.png'});
 

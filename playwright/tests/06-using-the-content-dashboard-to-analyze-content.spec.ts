@@ -28,7 +28,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/03.png'});
 
 	// Step 2. Click *Configure* (![](../../images/icon-cog.png)) for the Content Chart.
-	await press(page, 'Configure');
+	await press(page, 'Configure', 'Content Chart');
 
 	// Step 3. Use the *left arrow* (![](../../images/icon-caret-left.png)) to remove the *Audience* and *Stage* vocabularies
 	// Not performed: no control or value named in this step.

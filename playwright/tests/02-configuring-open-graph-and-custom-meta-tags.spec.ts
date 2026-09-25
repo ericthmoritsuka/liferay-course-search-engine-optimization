@@ -26,9 +26,12 @@ test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 	await press(page, 'Open Graph');
 
 	// Step 2. Enter these values:
-	// Not entered: Settings > Image, Settings > Image Alt Description, Settings > Use Custom Title, Settings > Custom Title, Settings > Use Custom Description, Settings > Custom Description - inside a panel or a language this cannot address yet.
+	await fill(page, 'Image Alt Description', 'Collection of aviator, wayfarer, and cat-eye sunglasses.', {section: 'Settings'});
+	await fill(page, 'Custom Title', 'Discover Quality Sunglasses for Men and Women', {section: 'Settings'});
+	// Not entered: Settings > Use Custom Title, Settings > Use Custom Description, Settings > Custom Description - chosen from a control rather than typed.
+	// Not entered: Settings > Image - a file picked from disk.
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/04.png'});
 
 	// Step 3. Preview your configuration.
 	// Not performed: no control or value named in this step.
@@ -42,7 +45,8 @@ test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 	await press(page, 'Custom Meta Tags');
 
 	// Step 6. Enter these values:
-	// Not entered: Settings > Property, Settings > Property > Content - inside a panel or a language this cannot address yet.
+	await fill(page, 'Property', 'viewport', {section: 'Settings'});
+	await fill(page, 'Content', 'width=device-width, initial-scale=1', {section: 'Settings'});
 
 	// Step 7. Click *Save*.
 	await press(page, 'Save');

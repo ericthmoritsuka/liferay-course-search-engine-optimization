@@ -31,6 +31,17 @@ const MENUS: Record<string, {root: string; trigger: string}> = {
 };
 
 /** Long enough for a panel or dialog to arrive after the network goes quiet. */
+//
+// How long a control is given to appear before it is treated as absent.
+//
+const FIND_TIMEOUT = 8000;
+
+//
+// How long a click is given to change the screen before the absence of a
+// change is treated as evidence.
+//
+const CHANGE_TIMEOUT = 10000;
+
 const SETTLE = 900;
 
 /**
@@ -43,13 +54,47 @@ const SETTLE = 900;
  * Reads the value back afterwards. A field that fills itself in from another
  * accepts the typing and ends up holding both values, and nothing throws.
  */
-export async function fill(page: Page, field: string, value: string) {
+export async function fill(
+	page: Page,
+	field: string,
+	value: string,
+	where: {language?: string; section?: string} = {}
+) {
+	//
+	// The panel the field sits in, opened when the lesson named one.
+	//
+	// A page's configuration repeats field names across its panels, and a
+	// collapsed panel's fields are not on the screen at all - so naming the
+	// panel is both how the right field is found and how it becomes
+	// reachable.
+	//
+	if (where.section) {
+		await openSection(page, where.section);
+	}
+
+	//
+	// The locale the value belongs to.
+	//
+	// A localised field renders one input per language, all carrying the same
+	// label. Typing by label alone puts the Spanish text in the English box
+	// and then reads it back successfully - a wrong result that reports
+	// itself as a right one, which is the worst thing this can do.
+	//
+	if (where.language) {
+		await chooseLanguage(page, where.language);
+	}
+
 	const input = await findField(page, field);
 
 	expect(
 		input,
-		`no field named "${field}" is on this screen, in any frame`
+		where.language
+			? `no field named "${field}" for ${where.language} is on this ` +
+				`screen, in any frame`
+			: `no field named "${field}" is on this screen, in any frame`
 	).not.toBeNull();
+
+	await input!.scrollIntoViewIfNeeded({timeout: 4000}).catch(() => undefined);
 
 	await input!.fill(value);
 
@@ -57,6 +102,134 @@ export async function fill(page: Page, field: string, value: string) {
 		input!,
 		`the field "${field}" does not hold what was typed into it`
 	).toHaveValue(value);
+}
+
+/** Open a named panel of a configuration sidebar, if it is not already open. */
+async function openSection(page: Page, section: string) {
+	const escaped = section.replace(/"/g, '\\"');
+
+	for (const frame of page.frames()) {
+		const heading = frame
+			.locator(
+				`button:has-text("${escaped}"), [role="button"]:has-text("${escaped}"), ` +
+					`[role="tab"]:has-text("${escaped}"), a:has-text("${escaped}")`
+			)
+			.first();
+
+		if (!(await heading.count().catch(() => 0))) {
+			continue;
+		}
+
+		const open = await heading
+			.evaluate(
+				(node) =>
+					node.getAttribute('aria-expanded') === 'true' ||
+					node.getAttribute('aria-selected') === 'true'
+			)
+			.catch(() => false);
+
+		if (!open) {
+			await heading.click({timeout: 4000}).catch(() => undefined);
+
+			await page.waitForTimeout(SETTLE);
+		}
+
+		return;
+	}
+}
+
+/** Switch a localisable form to the language a value belongs to. */
+async function chooseLanguage(page: Page, language: string) {
+	const escaped = language.replace(/"/g, '\\"');
+
+	for (const frame of page.frames()) {
+		const selector = frame
+			.locator(
+				'[data-qa-id="languageSelector"], [aria-label*="anguage"], ' +
+					'button[class*="language"], .language-flags button'
+			)
+			.first();
+
+		if (!(await selector.count().catch(() => 0))) {
+			continue;
+		}
+
+		await selector.click({timeout: 4000}).catch(() => undefined);
+
+		await page.waitForTimeout(SETTLE);
+
+		const option = frame
+			.locator(
+				`[role="menuitem"]:has-text("${escaped}"), ` +
+					`[role="option"]:has-text("${escaped}"), ` +
+					`button:has-text("${escaped}"), a:has-text("${escaped}")`
+			)
+			.first();
+
+		if (await option.count().catch(() => 0)) {
+			await option.click({timeout: 4000}).catch(() => undefined);
+
+			await page.waitForTimeout(SETTLE);
+		}
+
+		return;
+	}
+}
+
+/**
+ * Drag one thing onto another, as a page-editor step describes.
+ *
+ * Playwright's dragTo() dispatches HTML5 drag events, which Liferay's page
+ * editor does not listen for - it tracks the pointer. So the pointer is what
+ * this moves, which is how liferay-portal's own page editor tests do it
+ * (modules/test/playwright/pages/layout-content-page-editor-web).
+ *
+ * Hovering the target at its centre matters: dropping on an edge lands the
+ * fragment in the neighbouring container, which looks like a passing step and
+ * builds the wrong page.
+ */
+export async function drag(page: Page, source: string, target: string) {
+	const from = await findDraggable(page, source);
+
+	expect(
+		from,
+		`nothing named "${source}" on this screen can be dragged`
+	).not.toBeNull();
+
+	const onto = await findDropTarget(page, target);
+
+	expect(
+		onto,
+		`there is nowhere named "${target}" on this screen to drop "${source}" into`
+	).not.toBeNull();
+
+	await from!.scrollIntoViewIfNeeded({timeout: 4000}).catch(() => undefined);
+
+	await from!.hover({timeout: 8000});
+
+	await page.mouse.down();
+
+	//
+	// Moved in steps rather than jumped. A single hover can land without the
+	// editor registering a drag at all, because it needs pointer movement to
+	// decide something is being dragged.
+	//
+	const box = await onto!.boundingBox();
+
+	if (box) {
+		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+			steps: 12,
+		});
+	}
+	else {
+		await onto!.hover({force: true, timeout: 8000});
+	}
+
+	await page.waitForTimeout(300);
+
+	await page.mouse.up();
+
+	await page.waitForTimeout(SETTLE);
 }
 
 /**
@@ -67,6 +240,45 @@ export async function fill(page: Page, field: string, value: string) {
  * menu read once is wrong for some steps however carefully it was read.
  */
 export async function openMenu(
+	page: Page,
+	menuName: string,
+	section: string | null,
+	application: string
+) {
+	//
+	// Tried again rather than given up on, which is what a reader does when a
+	// menu does not open.
+	//
+	// Measured: the first test run after the instance restarts fails on the
+	// Global Menu, and the same test passes when it runs eighth. The page
+	// renders before the menu it carries is usable, and no readiness check on
+	// the server side predicts it - so the recovery belongs here.
+	//
+	let failure: unknown;
+
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			await reachApplication(page, menuName, section, application);
+
+			return;
+		}
+		catch (error) {
+			failure = error;
+
+			await page.reload({timeout: 20000}).catch(() => undefined);
+
+			await page
+				.waitForLoadState('domcontentloaded', {timeout: 10000})
+				.catch(() => undefined);
+
+			await page.waitForTimeout(SETTLE);
+		}
+	}
+
+	throw failure;
+}
+
+async function reachApplication(
 	page: Page,
 	menuName: string,
 	section: string | null,
@@ -83,6 +295,30 @@ export async function openMenu(
 	// server, so pressing it blindly closes a menu that was already open and
 	// the applications vanish.
 	//
+	//
+	// Confirmed open, and reopened if it is not.
+	//
+	// The toggle keeps its state on the server, so a stale state makes this
+	// skip the click and search a menu that is shut - which reported the menu
+	// as offering no such application. Intermittent, and it cost a test that
+	// had been passing.
+	//
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (await panel.isVisible().catch(() => false)) {
+			break;
+		}
+
+		await page
+			.locator(menu.trigger)
+			.first()
+			.click({timeout: 4000})
+			.catch(() => undefined);
+
+		await panel
+			.waitFor({state: 'visible', timeout: 4000})
+			.catch(() => undefined);
+	}
+
 	if (!(await panel.isVisible().catch(() => false))) {
 		await page.locator(menu.trigger).first().click();
 
@@ -108,6 +344,128 @@ export async function openMenu(
 	}
 
 	//
+	// When the lesson names no section, every tab is opened in turn until the
+	// application appears. A menu's applications are split across tabs -
+	// User Groups lives under Control Panel - so a phrasing like "the User
+	// Groups application in the Global Menu", which never states a tab, finds
+	// nothing while standing on the tab that happened to be showing.
+	//
+	//
+	// Looked for where the menu is already standing, before going anywhere.
+	//
+	// Some applications are on the menu's own first screen - a site is, and
+	// "Open the Global Menu and select Clarity Public Enterprise Website"
+	// names one. Walking the sections first navigated away from the panel
+	// holding exactly what was wanted.
+	//
+	if (
+		!section &&
+		!(await page
+			.locator(`${menu.root} a:has-text("${application}")`)
+			.count()
+			.catch(() => 0))
+	) {
+
+		//
+		// Each section is tried in turn, reopening the menu before every one.
+		//
+		// Clicking a Global Menu section closes the dropdown, so walking the
+		// tabs in a single pass closes the menu on the first click and then
+		// searches a screen with no menu on it. The sections are read once
+		// while the panel is open, and the panel is reopened for each.
+		//
+		//
+		// A section of this menu is a link, not a tab.
+		//
+		// Read from a running instance rather than assumed: the Global Menu
+		// holds Applications, Commerce, CMS, Control Panel, and then the
+		// sites. Looking for [role="tab"] found nothing at all, so the walk
+		// had no sections to try and every unsectioned path failed.
+		//
+		// The two that hold administrative applications are tried first, so a
+		// site link - which navigates away - is only reached if neither had
+		// what the lesson named.
+		//
+		//
+		// Only the sections that hold applications are tried.
+		//
+		// The rest of this menu is a list of sites, and clicking one
+		// navigates into it: a walk that kept going ended up editing a
+		// fragment in the Global site, several screens from anything the
+		// lesson mentioned. Failing to find the application is a far better
+		// outcome than wandering off into unrelated administration.
+		//
+		const SECTIONS = ['Control Panel', 'Applications', 'Commerce'];
+
+		const found = (
+			await page
+				.locator(
+					`${menu.root} a, ${menu.root} [role="tab"], ` +
+						`${menu.root} [role="button"][aria-expanded]`
+				)
+				.allInnerTexts()
+				.catch(() => [] as string[])
+		)
+			.map((name) => name.trim().split('\n')[0].trim())
+			.filter((name) => name && (name !== application));
+
+		const names = SECTIONS.filter((name) => found.includes(name));
+
+		for (const name of names) {
+			if (
+				await page
+					.locator(`a:text-is("${application}")`)
+					.count()
+					.catch(() => 0)
+			) {
+				break;
+			}
+
+			if (!(await panel.isVisible().catch(() => false))) {
+				await page
+					.locator(menu.trigger)
+					.first()
+					.click({timeout: 4000})
+					.catch(() => undefined);
+
+				await page.waitForTimeout(SETTLE);
+			}
+
+			//
+			// Matched by substring, as the explicit-section path already
+			// does. :text-is() compares raw text content, and these anchors
+			// carry nested text besides their name, so an exact comparison
+			// never matched and the click silently did nothing.
+			//
+			await page
+				.locator(
+					`${menu.root} a:has-text("${name}"), ` +
+						`${menu.root} [role="tab"]:has-text("${name}"), ` +
+						`${menu.root} [role="button"]:has-text("${name}")`
+				)
+				.first()
+				.click({timeout: 4000})
+				.catch(() => undefined);
+
+			await page
+				.waitForLoadState('domcontentloaded', {timeout: 8000})
+				.catch(() => undefined);
+
+			//
+			// Waited for, not sampled. A section navigates to a new screen,
+			// and asking once whether the application is on it answers no
+			// while the screen is still arriving - so the walk moved on to
+			// the next section and eventually into a site.
+			//
+			await page
+				.locator(`a:text-is("${application}")`)
+				.first()
+				.waitFor({state: 'attached', timeout: 8000})
+				.catch(() => undefined);
+		}
+	}
+
+	//
 	// Searched on the page, not inside the panel. Clicking a Global Menu
 	// section closes the dropdown and renders that section's applications
 	// elsewhere, so a search confined to the panel finds nothing every time.
@@ -122,7 +480,7 @@ export async function openMenu(
 	await expect(
 		link,
 		`the ${menuName} on this screen offers no application named "${application}"`
-	).toHaveCount(1, {timeout: 15000});
+	).toHaveCount(1, {timeout: 8000});
 
 	await link.click();
 
@@ -155,16 +513,66 @@ export async function openMenu(
  * including an inert span, and raises nothing - so "the click did not throw"
  * is not the same as "the step was performed".
  */
-export async function press(page: Page, label: string) {
+export async function press(page: Page, label: string, within?: string) {
 	const before = await screenPrint(page);
 
 	const escaped = label.replace(/"/g, '\\"');
 
 	//
+	// The row, card, or item the lesson named.
+	//
+	// "Click *Actions* for Christian Carter" names one row of a table where
+	// every row has an Actions control. Dropping the qualifier and taking the
+	// first match acted on whoever happened to be at the top - and because
+	// something did open, every check downstream agreed it had worked. This
+	// is the one defect class that produces a confidently wrong result rather
+	// than a failure.
+	//
+	const inside = within ? within.replace(/"/g, '\\"') : null;
+
+	//
 	// page.frames() already includes the main frame, so listing the page
 	// alongside it tried everything twice and doubled the time a miss costs.
 	//
-	for (const scope of page.frames()) {
+	//
+	// Searched until it appears, not once.
+	//
+	// A control is queried the moment the previous step's screen changed,
+	// which is before Liferay has finished rendering the one that replaced
+	// it. locator.count() does not wait, so a control that arrives 300ms
+	// later was reported as absent and the test blamed the lesson.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	let ambiguous = 0;
+
+	let seen = false;
+
+	while (Date.now() < deadline) {
+	for (const frame of page.frames()) {
+		//
+		// Narrowed to the named row where one exists, and left alone where it
+		// does not. A qualifier is not always a table row: "Reindex for All
+		// Search Indexes" names a control in a panel, and refusing to act
+		// because no <tr> carried that text broke a step that had been
+		// working. The ambiguity check below is what guards the wrong click,
+		// so falling back here costs nothing.
+		//
+		let scope: Locator | Frame = frame;
+
+		if (inside) {
+			const container = frame
+				.locator(
+					`tr:has-text("${inside}"), [role="row"]:has-text("${inside}"), ` +
+						`li:has-text("${inside}"), .list-group-item:has-text("${inside}"), ` +
+						`.card:has-text("${inside}")`
+				)
+				.last();
+
+			if (await container.count().catch(() => 0)) {
+				scope = container;
+			}
+		}
 
 		//
 		// Exact text first, substring only as a fallback.
@@ -178,31 +586,149 @@ export async function press(page: Page, label: string) {
 		//
 		// An exact match is what a lesson means when it prints a label.
 		//
-		const exact = scope
-			.locator(
+		//
+		// Ordered by how precisely each identifies a control, and a pass that
+		// matches more than one is refused rather than resolved with first().
+		//
+		// The accessible name comes first because the visible text does not
+		// identify a control on its own: the Add User screen carries three
+		// buttons reading "Select" - one for the image, one named "Select
+		// Topic", one named "Select Tags". Taking the first match clicked the
+		// wrong one, opened something, and the screen-changed check called
+		// that success. A wrong click that passes is worse than a miss.
+		//
+		const candidates = [
+			scope
+				.getByRole('button', {exact: true, name: label})
+				.or(scope.getByRole('link', {exact: true, name: label})),
+			scope.locator(
 				`a:text-is("${escaped}"), button:text-is("${escaped}"), ` +
 					`[role="menuitem"]:text-is("${escaped}"), ` +
 					`[role="tab"]:text-is("${escaped}"), ` +
 					`[role="button"]:text-is("${escaped}")`
-			)
-			.or(scope.getByRole('button', {exact: true, name: label}))
-			.or(scope.getByRole('link', {exact: true, name: label}))
-			.first();
+			),
+			scope
+				.getByRole('button', {exact: false, name: label})
+				.or(scope.getByRole('link', {exact: false, name: label}))
+				.or(
+					scope.locator(
+						`a:has-text("${escaped}"), button:has-text("${escaped}"), ` +
+							`[role="menuitem"]:has-text("${escaped}"), ` +
+							`[role="tab"]:has-text("${escaped}"), ` +
+							`[role="button"]:has-text("${escaped}")`
+					)
+				),
+		];
 
-		const loose = scope
-			.locator(
-				`a:has-text("${escaped}"), button:has-text("${escaped}"), ` +
-					`[role="menuitem"]:has-text("${escaped}"), ` +
-					`[role="tab"]:has-text("${escaped}"), ` +
-					`[role="button"]:has-text("${escaped}")`
-			)
-			.or(scope.getByRole('button', {exact: false, name: label}))
-			.or(scope.getByRole('link', {exact: false, name: label}))
-			.first();
+		//
+		// A control the reader operates rather than clicks.
+		//
+		// press() knew links, buttons, tabs and menu items only, so a
+		// checkbox, radio, switch, or option of a select could not be reached
+		// at all - and a lesson step naming one was reported as naming a
+		// control that is not on the screen. Selecting a person from a picker
+		// and choosing a redirect type are both this.
+		//
+		const toggle = scope
+			.getByRole('checkbox', {exact: true, name: label})
+			.or(scope.getByRole('radio', {exact: true, name: label}))
+			.or(scope.getByRole('switch', {exact: true, name: label}));
 
-		const control = (await exact.count().catch(() => 0)) ? exact : loose;
+		if ((await toggle.count().catch(() => 0)) === 1) {
+			seen = true;
 
-		if (!(await control.count().catch(() => 0))) {
+			try {
+				await toggle.first().check({timeout: 4000});
+
+				return;
+			}
+			catch (error) {
+				// Fall through to the controls below.
+			}
+		}
+
+		const chooser = scope
+			.locator('select')
+			.filter({has: scope.locator(`option:text-is("${escaped}")`)});
+
+		if ((await chooser.count().catch(() => 0)) === 1) {
+			seen = true;
+
+			try {
+				await chooser.first().selectOption({label});
+
+				return;
+			}
+			catch (error) {
+				// Fall through to the controls below.
+			}
+		}
+
+		//
+		// Counted among what the reader can actually see.
+		//
+		// Liferay keeps a dropdown in the DOM for every row of a table, so
+		// "Impersonate User" matched eleven controls when exactly one menu
+		// was open. Counting hidden copies made an unambiguous screen look
+		// ambiguous and stopped a step that a reader performs without
+		// hesitating.
+		//
+		let control: Locator | null = null;
+
+		for (const candidate of candidates) {
+			const shown: Locator[] = [];
+
+			for (const element of await candidate.all().catch(() => [])) {
+				if (await element.isVisible().catch(() => false)) {
+					shown.push(element);
+				}
+			}
+
+			if (shown.length === 1) {
+				control = shown[0];
+
+				break;
+			}
+
+			if (shown.length > 1) {
+				ambiguous = shown.length;
+			}
+		}
+
+		if (!control) {
+			//
+				// "Select Christian Carter" in a picker means tick the box in his
+			// row. The box carries no name of its own - the name is in a cell
+			// beside it - so no search by label can reach it, and the step read
+			// as naming a control the screen does not have.
+			//
+			const rowBox = scope
+				.locator(
+					`tr:has-text("${escaped}"), [role="row"]:has-text("${escaped}"), ` +
+						`li:has-text("${escaped}"), .list-group-item:has-text("${escaped}")`
+				)
+				.locator('input[type="checkbox"], [role="checkbox"]');
+
+			const rowBoxes: Locator[] = [];
+
+			for (const element of await rowBox.all().catch(() => [])) {
+				if (await element.isVisible().catch(() => false)) {
+					rowBoxes.push(element);
+				}
+			}
+
+			if (rowBoxes.length === 1) {
+				seen = true;
+
+				try {
+					await rowBoxes[0].check({timeout: 4000});
+
+					return;
+				}
+				catch (error) {
+					// Fall through to the controls below.
+				}
+			}
 			continue;
 		}
 
@@ -212,13 +738,29 @@ export async function press(page: Page, label: string) {
 		// check below then blamed the control for not opening anything, when
 		// the truth was that nothing had been clicked at all.
 		//
+		//
+		// A matching control existed. Recorded before the click so that a
+		// control which is present but unclickable is reported as exactly
+		// that, rather than as absent - the two need opposite fixes, and
+		// reporting both as "no control reading X" sent every one of them to
+		// be investigated as a wrong label in the lesson.
+		//
+		seen = true;
+
+		try {
+			await control.scrollIntoViewIfNeeded({timeout: 2000});
+		}
+		catch (error) {
+			// Not fatal: a control already in view needs no scrolling.
+		}
+
 		try {
 			//
 			// Bounded. A miss must be cheap: the default wait is thirty
 			// seconds, and a handful of those exhausts the whole test's
 			// budget before it reaches the step that matters.
 			//
-			await control.click({timeout: 8000});
+			await control.click({timeout: 4000});
 		}
 		catch (error) {
 			continue;
@@ -233,41 +775,191 @@ export async function press(page: Page, label: string) {
 			.waitForLoadState('networkidle', {timeout: 4000})
 			.catch(() => undefined);
 
-		await page.waitForTimeout(SETTLE);
+		//
+		// Polled until the screen differs, rather than read once after a
+		// fixed wait.
+		//
+		// Liferay navigates and renders in its own time, and a single reading
+		// called a working click a failure: pressing New on Users and
+		// Organizations opens Add User, and the check read the screen before
+		// Add User had arrived. A change is proof as soon as it appears; the
+		// absence of one is only proof once the waiting is done.
+		//
+		const deadline = Date.now() + CHANGE_TIMEOUT;
 
-		expect(
-			await screenPrint(page),
-			`"${label}" was pressed and nothing on the screen changed, so ` +
-				`whatever it was meant to open did not open`
-		).not.toBe(before);
+		let after = before;
+
+		while (Date.now() < deadline) {
+			after = await screenPrint(page);
+
+			if (after !== before) {
+				break;
+			}
+
+			await page.waitForTimeout(250);
+		}
+
+		//
+		// A control that became selected counts as having worked, even where
+		// the screen reads the same.
+		//
+		// Pressing a tab swaps one panel for another, and the two often carry
+		// almost identical text - so comparing what the screen says reported
+		// a working click as a click that did nothing. What the control says
+		// about itself is the better evidence here.
+		//
+		const selected = await control
+			.evaluate(
+				(node) =>
+					node.getAttribute('aria-selected') === 'true' ||
+					node.getAttribute('aria-expanded') === 'true' ||
+					node.classList.contains('active')
+			)
+			.catch(() => false);
+
+		if (!selected) {
+			expect(
+				after,
+				`"${label}" was pressed and nothing on the screen changed, so ` +
+					`whatever it was meant to open did not open`
+			).not.toBe(before);
+		}
 
 		return;
 	}
 
+		await page.waitForTimeout(250);
+	}
+
+	if (ambiguous && !seen) {
+		throw new Error(
+			`"${label}" matches ${ambiguous} controls on this screen, so which ` +
+				`one the step means cannot be told from the label alone - the ` +
+				`lesson needs to say which, as in "Select for the image"`
+		);
+	}
+
 	throw new Error(
-		`no control reading or announcing "${label}" is on this screen`
+		seen
+			? `"${label}" is on this screen but could not be clicked - it may ` +
+				`be covered, disabled, or outside the visible area`
+			: `no control reading or announcing "${label}" is on this screen`
 	);
+}
+
+async function findDraggable(
+	page: Page,
+	name: string
+): Promise<Locator | null> {
+	const escaped = name.replace(/"/g, '\\"');
+
+	for (const frame of page.frames()) {
+		const candidate = frame
+			.locator(
+				`[draggable="true"]:has-text("${escaped}"), ` +
+					`.page-editor__sidebar__fragment-card:has-text("${escaped}"), ` +
+					`li:has-text("${escaped}")`
+			)
+			.first();
+
+		if (await candidate.count().catch(() => 0)) {
+			return candidate;
+		}
+	}
+
+	return null;
+}
+
+async function findDropTarget(
+	page: Page,
+	name: string
+): Promise<Locator | null> {
+	const escaped = name.replace(/"/g, '\\"');
+
+	for (const frame of page.frames()) {
+		const candidate = frame
+			.locator(
+				`[class*="drop"]:has-text("${escaped}"), ` +
+					`[class*="container"]:has-text("${escaped}"), ` +
+					`[aria-label*="${escaped}"]`
+			)
+			.last()
+			.or(frame.getByText(name, {exact: false}).last())
+			.first();
+
+		if (await candidate.count().catch(() => 0)) {
+			return candidate;
+		}
+	}
+
+	return null;
 }
 
 async function findField(page: Page, field: string): Promise<Locator | null> {
 	//
-	// Exact label first, across every frame, before falling back to a
-	// substring anywhere. getByLabel({exact: false}) is a case-insensitive
-	// substring, so fill(page, 'name', ...) matched Username, Display Name,
-	// Template Name and Friendly URL Name - and then read that same wrong
-	// field back, so the verification agreed with itself.
+	// Constrained to something that can actually hold text. Without this the
+	// substring pass below returned labels and wrapper elements, and the fill
+	// failed with "Element is not an <input>" while naming the right field.
 	//
-	for (const exact of [true, false]) {
+	const FILLABLE = 'input, textarea, select, [contenteditable="true"]';
+
+	const quoted = field.replace(/"/g, '');
+
+	//
+	// Three passes, in order of how much they prove.
+	//
+	// 1. The accessible name, exactly. getByLabel({exact: false}) is a
+	//    case-insensitive substring, so fill(page, 'name', ...) matched
+	//    Username, Display Name, Template Name and Friendly URL Name - and
+	//    then read that same wrong field back, so the verification agreed
+	//    with itself.
+	//
+	// 2. The visible label. Liferay names some controls after their helper
+	//    text rather than their label: the Description box on a user group
+	//    announces itself as "Characters Maximum: 4000", so a reader looking
+	//    at a field clearly labelled Description cannot be matched by name at
+	//    all. The label is what the lesson saw, so the label is what this
+	//    follows - to the first field after it in the document.
+	//
+	// 3. The accessible name as a substring, which is the old behaviour and
+	//    the least trustworthy.
+	//
+	//
+	// Retried for the same reason press() is: a form is queried as soon as
+	// the screen carrying it changed, which is before its fields exist.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (Date.now() < deadline) {
+	for (const pass of ['exact', 'label', 'loose']) {
 		for (const frame of page.frames()) {
-			const candidate = frame
-				.getByLabel(field, {exact})
-				.or(frame.getByPlaceholder(field, {exact}))
-				.first();
+			let candidate: Locator;
+
+			if (pass === 'label') {
+				candidate = frame
+					.locator(
+						`xpath=//label[normalize-space(translate(normalize-space(.), "*", "")) = "${quoted}"]` +
+							`/following::*[self::input or self::textarea or self::select][1]`
+					)
+					.first();
+			}
+			else {
+				const exact = pass === 'exact';
+
+				candidate = frame
+					.getByLabel(field, {exact})
+					.or(frame.getByPlaceholder(field, {exact}))
+					.and(frame.locator(FILLABLE))
+					.first();
+			}
 
 			if (await candidate.count().catch(() => 0)) {
 				return candidate;
 			}
 		}
+	}
+
+		await page.waitForTimeout(250);
 	}
 
 	return null;
