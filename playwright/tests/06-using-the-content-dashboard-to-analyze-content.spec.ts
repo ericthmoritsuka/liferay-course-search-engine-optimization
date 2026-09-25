@@ -36,7 +36,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 	// Step 4. Use the *right arrow* (![](../../images/icon-caret-right.png)) to add the *Job Positions* and *Region* vocabul
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/04.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 5. Click *Save* and close the modal window.
 	await press(page, 'Save');

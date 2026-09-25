@@ -23,26 +23,26 @@ test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 	await signIn(page, 'admin');
 
 	// Step 1. While configuring the Quality Sunglasses page, go to the *Open Graph* tab.
-	// Not performed: no control or value named in this step.
+	await press(page, 'Open Graph');
 
 	// Step 2. Enter these values:
-	// Not performed: the step does not name a field and a value plainly enough.
+	// Not entered: Settings > Image, Settings > Image Alt Description, Settings > Use Custom Title, Settings > Custom Title, Settings > Use Custom Description, Settings > Custom Description - inside a panel or a language this cannot address yet.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/04.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 3. Preview your configuration.
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/05.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 4. Click *Save*.
 	await press(page, 'Save');
 
 	// Step 5. Go to the *Custom Meta Tags* tab.
-	// Not performed: no control or value named in this step.
+	await press(page, 'Custom Meta Tags');
 
 	// Step 6. Enter these values:
-	// Not performed: the step does not name a field and a value plainly enough.
+	// Not entered: Settings > Property, Settings > Property > Content - inside a panel or a language this cannot address yet.
 
 	// Step 7. Click *Save*.
 	await press(page, 'Save');

@@ -44,12 +44,14 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	// Step 5. In the General tab, click the *Language* button for Name, select *es-ES*, and set these values:
 	await press(page, 'Language');
 	await press(page, 'es-ES');
+	// Not entered: Basic Info > Name, URL > Friendly URL - inside a panel or a language this cannot address yet.
 
 	// Step 6. Click *Save*.
 	await press(page, 'Save');
 
 	// Step 7. Go to the *SEO* tab and set these values:
-	// Not performed: no control or value named in this step.
+	await press(page, 'SEO');
+	// Not entered: Settings > HTML Title, Settings > Description, Settings > Keywords - inside a panel or a language this cannot address yet.
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/03.png'});
 

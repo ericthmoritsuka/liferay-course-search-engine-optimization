@@ -166,16 +166,41 @@ export async function press(page: Page, label: string) {
 	//
 	for (const scope of page.frames()) {
 
-		const control = scope
+		//
+		// Exact text first, substring only as a fallback.
+		//
+		// :has-text() is a case-insensitive SUBSTRING that also matches
+		// ancestors, and getByRole({exact: false}) is substring too. So
+		// press('New') matched Newsletter and News, press('Add') matched
+		// Address, press('ID') matched Video and Hidden - and the only guard,
+		// that the screen changed, is satisfied by any of them. The corpus
+		// uses labels this short: ID, HR, H2, Ok, link, Text, Page, Home.
+		//
+		// An exact match is what a lesson means when it prints a label.
+		//
+		const exact = scope
+			.locator(
+				`a:text-is("${escaped}"), button:text-is("${escaped}"), ` +
+					`[role="menuitem"]:text-is("${escaped}"), ` +
+					`[role="tab"]:text-is("${escaped}"), ` +
+					`[role="button"]:text-is("${escaped}")`
+			)
+			.or(scope.getByRole('button', {exact: true, name: label}))
+			.or(scope.getByRole('link', {exact: true, name: label}))
+			.first();
+
+		const loose = scope
 			.locator(
 				`a:has-text("${escaped}"), button:has-text("${escaped}"), ` +
 					`[role="menuitem"]:has-text("${escaped}"), ` +
 					`[role="tab"]:has-text("${escaped}"), ` +
 					`[role="button"]:has-text("${escaped}")`
 			)
-			.or(scope.getByRole('button', {name: label, exact: false}))
-			.or(scope.getByRole('link', {name: label, exact: false}))
+			.or(scope.getByRole('button', {exact: false, name: label}))
+			.or(scope.getByRole('link', {exact: false, name: label}))
 			.first();
+
+		const control = (await exact.count().catch(() => 0)) ? exact : loose;
 
 		if (!(await control.count().catch(() => 0))) {
 			continue;
@@ -225,14 +250,23 @@ export async function press(page: Page, label: string) {
 }
 
 async function findField(page: Page, field: string): Promise<Locator | null> {
-	for (const frame of page.frames()) {
-		const candidate = frame
-			.getByLabel(field, {exact: false})
-			.or(frame.getByPlaceholder(field, {exact: false}))
-			.first();
+	//
+	// Exact label first, across every frame, before falling back to a
+	// substring anywhere. getByLabel({exact: false}) is a case-insensitive
+	// substring, so fill(page, 'name', ...) matched Username, Display Name,
+	// Template Name and Friendly URL Name - and then read that same wrong
+	// field back, so the verification agreed with itself.
+	//
+	for (const exact of [true, false]) {
+		for (const frame of page.frames()) {
+			const candidate = frame
+				.getByLabel(field, {exact})
+				.or(frame.getByPlaceholder(field, {exact}))
+				.first();
 
-		if (await candidate.count().catch(() => 0)) {
-			return candidate;
+			if (await candidate.count().catch(() => 0)) {
+				return candidate;
+			}
 		}
 	}
 
@@ -241,13 +275,31 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 
 /** The address plus the shape of the visible text, as a cheap fingerprint. */
 async function screenPrint(page: Page): Promise<string> {
-	const shown = await page
-		.evaluate(() => {
-			const text = document.body ? document.body.innerText : '';
+	//
+	// Retried rather than swallowed. "Execution context was destroyed" is
+	// routine when a click starts a navigation, and answering '' for it made
+	// the fingerprint differ from any real one - so the check that a click
+	// changed the screen passed by construction exactly when the page was
+	// busiest.
+	//
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const shown = await page.evaluate(() => {
+				const text = document.body ? document.body.innerText : '';
 
-			return text.replace(/\s+/g, ' ').trim();
-		})
-		.catch(() => '');
+				return text.replace(/\s+/g, ' ').trim();
+			});
 
-	return `${page.url()}|${shown.length}|${shown.slice(0, 400)}`;
+			return `${page.url()}|${shown.length}|${shown.slice(0, 400)}`;
+		}
+		catch (error) {
+			await page.waitForTimeout(300);
+		}
+	}
+
+	//
+	// Still unreadable after three tries. Naming it is better than returning
+	// a value that would silently satisfy a comparison.
+	//
+	throw new Error('the screen could not be read to compare before and after');
 }

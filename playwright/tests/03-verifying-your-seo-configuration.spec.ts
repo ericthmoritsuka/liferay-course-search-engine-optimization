@@ -39,18 +39,17 @@ test('Verifying Your SEO Configuration', async ({page}) => {
 	// Step 5. Verify the correct values appear for the title and meta tags.
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/07.png'});
-
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/08.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 6. Verify the canonical `<link>` tags appear.
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/09.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 7. Verify the Open Graph and custom `<meta>` tags appear.
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/10.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 });

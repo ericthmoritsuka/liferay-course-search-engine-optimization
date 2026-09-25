@@ -26,18 +26,18 @@ test('Using Page Audit and Page Speed Insights', async ({page}) => {
 	// Not performed: no control or value named in this step.
 
 	// Step 2. Go to the *Home* page.
-	// Not performed: no control or value named in this step.
+	await press(page, 'Home');
 
 	// Step 3. Click Page Audit (![Page Audit](../../images/icon-page-audit-tool.png)) in the Application Bar.
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/01.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 4. In the Performance tab, review all load times and mouse over each element to highlight it in the page.
 	// Not performed: no control or value named in this step.
 
 	// Step 5. Go to the *PageSpeed Insights* tab.
-	// Not performed: no control or value named in this step.
+	await press(page, 'PageSpeed Insights');
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/02.png'});
 

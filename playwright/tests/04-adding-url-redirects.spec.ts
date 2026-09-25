@@ -42,17 +42,17 @@ test('Adding URL Redirects', async ({page}) => {
 	await openMenu(page, 'Site Menu', 'Configuration', 'Redirection');
 
 	// Step 6. Go to the *404 URLs* tab.
-	// Not performed: no control or value named in this step.
+	await press(page, '404 URLs');
 
 	// Step 7. Open a new browser and go to [http://localhost:8080/web/clarity/qualitysunglasses](http://localhost:8080/web/c
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/12.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 8. Return to your previous browser window and refresh the page.
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/13.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 9. Click *Actions* (![](../../images/icon-actions.png)) for the entry and select *Create Redirect*.
 	await press(page, 'Actions');
@@ -72,13 +72,13 @@ test('Adding URL Redirects', async ({page}) => {
 	await press(page, 'Create');
 
 	// Step 13. Go to the *Aliases* tab and confirm the redirect appears.
-	// Not performed: no control or value named in this step.
+	await press(page, 'Aliases');
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/16.png'});
 
 	// Step 14. Go to [http://localhost:8080/web/clarity/qualitysunglasses](http://localhost:8080/web/clarity/qualitysunglasse
 	// Not performed: no control or value named in this step.
 
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/17.png'});
+	// Screenshot skipped: the step it belongs to was not performed.
 
 });

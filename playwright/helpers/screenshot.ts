@@ -55,9 +55,38 @@ export type Shot = {
 export async function capture(page: Page, shot: Shot) {
 	const root = process.env.LIFERAY_LEARN_DIR;
 
-	const target = root
-		? path.join(root, 'courses/latest/en', shot.name)
-		: path.join(process.cwd(), 'screenshots', shot.name);
+	const base = root
+		? path.resolve(root, 'courses/latest/en')
+		: path.resolve(process.cwd(), 'screenshots');
+
+	const target = path.resolve(base, shot.name);
+
+	//
+	// Contained. path.join resolves "..", and the generator builds this name
+	// with os.path.relpath, which emits "../.." for any lesson that is not
+	// under courses/latest/en - so a scenario exported from a docs article or
+	// with an absolute path would send every capture in the run outside the
+	// tree, overwriting whatever it landed on.
+	//
+	if (target !== base && !target.startsWith(base + path.sep)) {
+		throw new Error(
+			`the screenshot name "${shot.name}" resolves outside ${base}`
+		);
+	}
+
+	//
+	// These overwrite published course images by design: that is how a run
+	// leaves a reviewable diff. It also means a careless run replaces them
+	// with whatever is on screen, so writing a NEW file - which no article
+	// references - is refused unless asked for. A capture that invents a path
+	// is a mistake, not a new screenshot.
+	//
+	if (root && !fs.existsSync(target) && !process.env.ALLOW_NEW_IMAGES) {
+		throw new Error(
+			`${shot.name} does not exist in liferay-learn, so no article ` +
+				`references it. Set ALLOW_NEW_IMAGES=1 to add it.`
+		);
+	}
 
 	fs.mkdirSync(path.dirname(target), {recursive: true});
 
