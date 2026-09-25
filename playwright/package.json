@@ -1,0 +1,14 @@
+{
+	"devDependencies": {
+		"@playwright/test": "^1.48.0",
+		"@types/node": "^22.0.0"
+	},
+	"name": "bewl-course-tests",
+	"private": true,
+	"scripts": {
+		"test": "playwright test",
+		"test:headed": "playwright test --headed",
+		"test:ui": "playwright test --ui"
+	},
+	"version": "1.0.0"
+}
