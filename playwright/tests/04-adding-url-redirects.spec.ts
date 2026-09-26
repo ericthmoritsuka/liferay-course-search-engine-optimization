@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, verifyHead, visitAsGuest} from '../helpers/liferay';
+import {attach, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, verifyHead, visitAsGuest, visitInNewBrowser} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -36,7 +36,7 @@ test('Adding URL Redirects', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/11.png'});
 
 	// Step 4. Return to *Clarity Public Enterprise Website*.
-	// Not performed: no control or value named in this step.
+	await goHome(page);
 
 	// Step 5. Open the *Site Menu* (![](../../images/icon-product-menu.png)), expand *Configuration*, and click *Redirection
 	await openMenu(page, 'Site Menu', 'Configuration', 'Redirection');
@@ -45,14 +45,14 @@ test('Adding URL Redirects', async ({page}) => {
 	await press(page, '404 URLs');
 
 	// Step 7. Open a new browser and go to [http://localhost:8080/web/clarity/qualitysunglasses](http://localhost:8080/web/c
+	await visitInNewBrowser(page, 'http://localhost:8080/web/clarity/qualitysunglasses');
+
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/12.png'});
+
+	// Step 8. Return to your previous browser window and refresh the page.
 	// Not performed: no control or value named in this step.
 
 	// Screenshot skipped: the step it belongs to was not performed.
-
-	// Step 8. Return to your previous browser window and refresh the page.
-	await goHome(page);
-
-	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/13.png'});
 
 	// Step 9. Click *Actions* (![](../../images/icon-actions.png)) for the entry and select *Create Redirect*.
 	await press(page, 'Actions', 'entry');

@@ -470,6 +470,53 @@ export async function visitAsGuest(page: Page, address: string) {
 }
 
 /**
+ * Look at an address in a separate browser, then come back.
+ *
+ * "Open a new browser and go to <url>" is a side trip: the reader keeps their
+ * administrative session in the window they came from, and returns to it in
+ * the step after. Clearing cookies in place would end that session, so this
+ * opens a second browser context, visits, closes it, and leaves the original
+ * page exactly where it was.
+ *
+ * The redirects exercise depends on this precisely: the side trip is what
+ * produces the 404 entry, and the step after it acts on that entry from the
+ * administrative screen it never left.
+ */
+export async function visitInNewBrowser(page: Page, address: string) {
+	const browser = page.context().browser();
+
+	expect(browser, 'this test has no browser to open a second window in')
+		.not.toBeNull();
+
+	const context = await browser!.newContext();
+
+	try {
+		const other = await context.newPage();
+
+		await other.goto(address);
+
+		await other
+			.waitForLoadState('domcontentloaded', {timeout: 15000})
+			.catch(() => undefined);
+	}
+	finally {
+		await context.close();
+	}
+
+	//
+	// Back where the reader was, refreshed - which is what the step after a
+	// side trip always says to do.
+	//
+	await page.reload({timeout: 20000}).catch(() => undefined);
+
+	await page
+		.waitForLoadState('domcontentloaded', {timeout: 15000})
+		.catch(() => undefined);
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
  * Check what the page renders into its head.
  *
  * This is the half of search engine optimisation a browser test is actually
