@@ -27,6 +27,29 @@ import {expect, Frame, Locator, Page} from '@playwright/test';
 // data-qa-id is the stable anchor and is listed first for that reason; the
 // aria-labels follow as a fallback for builds that lack it.
 //
+//
+// What a lesson calls a control, and what the product calls it.
+//
+// These are not guesses. Each comes from liferay-portal's own Playwright page
+// objects, which address the real element: the row menu a lesson calls
+// "Actions" is named "Open Page Options Menu" in the Pages application
+// (pages/layout-admin-web/PagesAdminPage.ts), and a lesson has no reason to
+// use that name because it is not what the reader sees.
+//
+// A lesson naming the visible label is correct. The map is how the visible
+// label reaches the element underneath it.
+//
+const LABEL_ALIASES: Record<string, string[]> = {
+	Actions: [
+		'Open Page Options Menu',
+		'Open Options Menu',
+		'Show Actions',
+		'Options',
+	],
+	Configure: ['Configuration'],
+	New: ['Add', 'Plus'],
+};
+
 const MENUS: Record<string, {root: string; trigger: string}> = {
 	'Global Menu': {
 		//
@@ -601,7 +624,7 @@ export async function press(page: Page, label: string, within?: string) {
 	let seen = false;
 
 	while (Date.now() < deadline) {
-	for (const frame of page.frames()) {
+	for (const frame of await scopesFor(page)) {
 		//
 		// Narrowed to the named row where one exists, and left alone where it
 		// does not. A qualifier is not always a table row: "Reindex for All
@@ -613,9 +636,20 @@ export async function press(page: Page, label: string, within?: string) {
 		let scope: Locator | Frame = frame;
 
 		if (inside) {
+			//
+			// The smallest thing on the screen that carries the name.
+			//
+			// A qualifier is not always a table row. "the Language button for
+			// Name" names a field, and a field's own group is what holds both
+			// the label and the button - so .form-group is tried before the
+			// wider containers. Taking the last match takes the innermost,
+			// because containers nest.
+			//
 			const container = frame
 				.locator(
-					`tr:has-text("${inside}"), [role="row"]:has-text("${inside}"), ` +
+					`.form-group:has-text("${inside}"), ` +
+						`fieldset:has-text("${inside}"), ` +
+						`tr:has-text("${inside}"), [role="row"]:has-text("${inside}"), ` +
 						`li:has-text("${inside}"), .list-group-item:has-text("${inside}"), ` +
 						`.card:has-text("${inside}")`
 				)
@@ -649,15 +683,41 @@ export async function press(page: Page, label: string, within?: string) {
 		// wrong one, opened something, and the screen-changed check called
 		// that success. A wrong click that passes is worse than a miss.
 		//
+		//
+		// Every name this control might answer to: the one the lesson used,
+		// then the ones the product uses for the same thing.
+		//
+		const names = [label, ...(LABEL_ALIASES[label] || [])];
+
+		let byName = scope.getByRole('button', {exact: true, name: label});
+
+		for (const name of names) {
+			byName = byName
+				.or(scope.getByRole('button', {exact: true, name}))
+				.or(scope.getByRole('link', {exact: true, name}))
+				.or(scope.getByRole('menuitem', {exact: true, name}))
+				.or(scope.locator(`[aria-label="${name.replace(/"/g, '\\"')}"]`))
+				.or(scope.locator(`[title="${name.replace(/"/g, '\\"')}"]`));
+		}
+
 		const candidates = [
-			scope
-				.getByRole('button', {exact: true, name: label})
-				.or(scope.getByRole('link', {exact: true, name: label})),
+			byName,
 			scope.locator(
 				`a:text-is("${escaped}"), button:text-is("${escaped}"), ` +
 					`[role="menuitem"]:text-is("${escaped}"), ` +
 					`[role="tab"]:text-is("${escaped}"), ` +
 					`[role="button"]:text-is("${escaped}")`
+			),
+			//
+			// A section of a page's configuration is a plain list item, not a
+			// button, a tab, or a link - the SEO, Open Graph and Custom Meta
+			// Tags sections are `.portlet-body li` in portal's own page
+			// object. Nothing above could ever have matched one.
+			//
+			scope.locator(
+				`.portlet-body li:text-is("${escaped}"), ` +
+					`nav li:text-is("${escaped}"), ` +
+					`[role="tablist"] li:text-is("${escaped}")`
 			),
 			scope
 				.getByRole('button', {exact: false, name: label})
@@ -1004,7 +1064,7 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 
 	while (Date.now() < deadline) {
 	for (const pass of ['exact', 'label', 'loose']) {
-		for (const frame of page.frames()) {
+		for (const frame of await scopesFor(page)) {
 			let candidate: Locator;
 
 			if (pass === 'label') {
@@ -1062,6 +1122,38 @@ async function closeOpenMenus(page: Page): Promise<boolean> {
 	}
 
 	return closed;
+}
+
+/**
+ * Where to look for a control, nearest the reader first.
+ *
+ * Liferay opens its create forms in a modal, and that modal is an iframe -
+ * so the name box a step means is in the newest frame, while the page behind
+ * it still has a search box that also answers to "Name". Searching the main
+ * frame first typed the page's name into the filter behind the dialog,
+ * pressed Add on a form nothing had filled, and reported the step done. The
+ * exercise then finished green having created nothing.
+ *
+ * Frames are returned newest first because a modal's frame is added last, and
+ * where a modal is open in a frame, that modal is returned ahead of the frame
+ * that holds it. A reader cannot touch what is behind a dialog either.
+ */
+async function scopesFor(page: Page): Promise<Array<Locator | Frame>> {
+	const scopes: Array<Locator | Frame> = [];
+
+	for (const frame of [...page.frames()].reverse()) {
+		const dialog = frame
+			.locator('.modal.show, .modal.d-block, [role="dialog"]')
+			.last();
+
+		if (await dialog.isVisible().catch(() => false)) {
+			scopes.push(dialog);
+		}
+
+		scopes.push(frame);
+	}
+
+	return scopes;
 }
 
 /** The address plus the shape of the visible text, as a cheap fingerprint. */

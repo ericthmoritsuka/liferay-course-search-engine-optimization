@@ -43,7 +43,7 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/02.png'});
 
 	// Step 5. In the General tab, click the *Language* button for Name, select *es-ES*, and set these values:
-	await press(page, 'Language');
+	await press(page, 'Language', 'Name');
 	await press(page, 'es-ES');
 	await fill(page, 'Name', 'Gafas de sol de calidad', {language: 'Spanish', section: 'Basic Info'});
 	await fill(page, 'Friendly URL', '/gafas-sol-calidad', {language: 'Spanish', section: 'URL'});
