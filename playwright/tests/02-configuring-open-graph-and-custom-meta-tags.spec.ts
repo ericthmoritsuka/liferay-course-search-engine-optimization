@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {fill, openMenu, openPageSettings, press} from '../helpers/liferay';
+import {attach, fill, openMenu, openPageSettings, press, toggle} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -32,10 +32,12 @@ test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 	await press(page, 'Open Graph');
 
 	// Step 2. Enter these values:
+	await attach(page, 'Image', 'liferay-course-search-engine-optimization/exercises/quality-sunglasses-01.jpeg');
+	await toggle(page, 'Use Custom Title', true);
+	await toggle(page, 'Use Custom Description', true);
 	await fill(page, 'Image Alt Description', 'Collection of aviator, wayfarer, and cat-eye sunglasses.', {section: 'Settings'});
 	await fill(page, 'Custom Title', 'Discover Quality Sunglasses for Men and Women', {section: 'Settings'});
-	// Not entered: Settings > Use Custom Title, Settings > Use Custom Description, Settings > Custom Description - chosen from a control rather than typed.
-	// Not entered: Settings > Image - a file picked from disk.
+	// Not entered: Settings > Custom Description - chosen from a control rather than typed.
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/04.png'});
 

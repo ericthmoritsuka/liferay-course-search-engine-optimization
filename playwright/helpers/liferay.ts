@@ -5,6 +5,9 @@
  * each carries the reason, because the obvious version of each one is wrong
  * in a way that is not obvious until it has cost an afternoon.
  */
+import * as fs from 'fs';
+import * as path from 'path';
+
 import {expect, Frame, Locator, Page} from '@playwright/test';
 
 /**
@@ -150,6 +153,18 @@ export async function fill(
 
 	await input!.scrollIntoViewIfNeeded({timeout: 4000}).catch(() => undefined);
 
+	//
+	// Said plainly. Liferay disables a field until whatever it describes
+	// exists - the alt text of an image that has not been chosen yet - and a
+	// bare fill spends fifteen seconds waiting for it to become editable and
+	// then reports a timeout that names nothing.
+	//
+	await expect(
+		input!,
+		`the field "${field}" is on this screen but disabled, so something ` +
+			`the step depends on has not been done yet`
+	).toBeEditable({timeout: 5000});
+
 	await input!.fill(value);
 
 	await expect(
@@ -158,15 +173,28 @@ export async function fill(
 	).toHaveValue(value);
 }
 
-/** Open a named panel of a configuration sidebar, if it is not already open. */
+/**
+ * Expand a named panel of a form, where one exists.
+ *
+ * A lesson writes a field's path as "Settings > Image Alt Description", and
+ * the first part is not always a panel on the screen: on the Open Graph tab
+ * the sections are General, Design, SEO, Open Graph and Custom Meta Tags, and
+ * nothing is called Settings. Clicking whatever else answers to that word
+ * navigated away from the form the step was filling, and the fill then timed
+ * out against a screen that had moved.
+ *
+ * So this expands a collapsed disclosure and does nothing else. A disclosure
+ * says what it is by carrying aria-expanded; anything without it is a link or
+ * a tab that would take the reader somewhere, which is never what naming a
+ * field's panel asks for.
+ */
 async function openSection(page: Page, section: string) {
 	const escaped = section.replace(/"/g, '\\"');
 
-	for (const frame of page.frames()) {
-		const heading = frame
+	for (const scope of await scopesFor(page)) {
+		const heading = scope
 			.locator(
-				`button:has-text("${escaped}"), [role="button"]:has-text("${escaped}"), ` +
-					`[role="tab"]:has-text("${escaped}"), a:has-text("${escaped}")`
+				`[aria-expanded]:has-text("${escaped}")`
 			)
 			.first();
 
@@ -174,19 +202,13 @@ async function openSection(page: Page, section: string) {
 			continue;
 		}
 
-		const open = await heading
-			.evaluate(
-				(node) =>
-					node.getAttribute('aria-expanded') === 'true' ||
-					node.getAttribute('aria-selected') === 'true'
-			)
-			.catch(() => false);
-
-		if (!open) {
-			await heading.click({timeout: 4000}).catch(() => undefined);
-
-			await page.waitForTimeout(SETTLE);
+		if ((await heading.getAttribute('aria-expanded').catch(() => null)) === 'true') {
+			return;
 		}
+
+		await heading.click({timeout: 3000}).catch(() => undefined);
+
+		await page.waitForTimeout(SETTLE);
 
 		return;
 	}
@@ -228,6 +250,152 @@ async function chooseLanguage(page: Page, language: string) {
 
 		return;
 	}
+}
+
+/**
+ * Turn a named setting on or off.
+ *
+ * A lesson writes these as a value - "Use Custom Title | *Enabled*" - and
+ * they were reported as values this could not type. They are not values to
+ * type at all, they are switches to operate, and skipping them leaves the
+ * field they govern disabled: the step after asks for Custom Title and finds
+ * it present, correctly named, and not editable.
+ */
+export async function toggle(page: Page, field: string, on: boolean) {
+	//
+	// Exactly first, then as a substring.
+	//
+	// Liferay puts a setting's help text inside its label, so the box a
+	// lesson calls "Use Custom Title" announces itself as "Use Custom Title
+	// Use a custom title for this page..." and no exact match reaches it.
+	//
+	for (const exact of [true, false]) {
+	for (const scope of await scopesFor(page)) {
+		const control = scope
+			.getByRole('checkbox', {exact, name: field})
+			.or(scope.getByRole('switch', {exact, name: field}))
+			.or(scope.getByLabel(field, {exact}))
+			.first();
+
+		if (!(await control.count().catch(() => 0))) {
+			continue;
+		}
+
+		if (on) {
+			await control.check({timeout: 5000});
+		}
+		else {
+			await control.uncheck({timeout: 5000});
+		}
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+	}
+
+	throw new Error(
+		`no setting named "${field}" is on this screen to turn ` +
+			`${on ? 'on' : 'off'}`
+	);
+}
+
+/**
+ * Give a form a file the exercise keeps in the workspace.
+ *
+ * A step like "Settings > Image | Path: `.../quality-sunglasses-01.jpeg`"
+ * needs a file off the reader's disk, and a browser cannot be clicked through
+ * the operating system's file chooser. Playwright does not have to be: it
+ * hands the file straight to the input, which is what setInputFiles is for.
+ *
+ * This matters beyond the one step. Liferay disables the fields that describe
+ * an image until an image is there, so the step after this one fails with a
+ * field that is present, correctly named, and not editable - which reads as a
+ * broken lesson rather than a missing file.
+ *
+ * The path is the one the lesson prints, resolved against the workspace root,
+ * because that is where the course keeps its exercise material.
+ */
+export async function attach(page: Page, label: string, file: string) {
+	const relative = file.replace(/^.*?exercises\//, 'exercises/');
+
+	const candidates = [
+		path.resolve(process.cwd(), '..', relative),
+		path.resolve(process.cwd(), '..', file),
+	];
+
+	const found = candidates.find((candidate) => fs.existsSync(candidate));
+
+	expect(
+		found,
+		`the exercise file "${file}" is not in this workspace, so the step ` +
+			`that needs it cannot be performed`
+	).toBeTruthy();
+
+	//
+	// Twice: once for a form that takes the file directly, and once more
+	// after opening the picker for a form that does not.
+	//
+	// Liferay usually routes an image through Documents and Media rather than
+	// a plain file box, behind a control named for the field - "Select
+	// Image". The upload input lives inside that picker, so it is not on the
+	// screen until the picker is open.
+	//
+	for (let attempt = 0; attempt < 2; attempt++) {
+		//
+		// Waited for, not sampled. The picker is a modal in its own iframe
+		// and takes several seconds to arrive; asking once immediately after
+		// opening it finds the screen underneath and concludes nothing here
+		// takes a file.
+		//
+		const deadline = Date.now() + (attempt ? FIND_TIMEOUT * 2 : 0);
+
+		do {
+			for (const scope of await scopesFor(page)) {
+				const input = scope.locator('input[type="file"]').first();
+
+				if (await input.count().catch(() => 0)) {
+					await input.setInputFiles(found!);
+
+					await page.waitForTimeout(SETTLE * 3);
+
+					await confirmSelection(page);
+
+					return;
+				}
+			}
+
+			if (Date.now() < deadline) {
+				await page.waitForTimeout(500);
+			}
+		}
+		while (Date.now() < deadline);
+
+		if (attempt) {
+			break;
+		}
+
+		const opener = page
+			.locator(
+				`[aria-label="Select ${label}"], [title="Select ${label}"]`
+			)
+			.or(page.getByRole('button', {name: `Select ${label}`}))
+			.or(page.getByRole('button', {name: 'Select Image'}))
+			.first();
+
+		if (!(await opener.count().catch(() => 0))) {
+			break;
+		}
+
+		await opener.click({timeout: 4000}).catch(() => undefined);
+
+		await page.waitForTimeout(SETTLE * 2);
+	}
+
+	throw new Error(
+		`nothing on this screen accepts a file, so "${label}" could not be ` +
+			`given one - the picker may need a document that is already uploaded`
+	);
 }
 
 /**
@@ -401,20 +569,56 @@ async function reachApplication(
 	}
 
 	if (section) {
+		//
+		// A section of this menu is a tab button on 2026.q1 LTS and a link on
+		// 2026.q3, so both are named here. role=tab is listed first because
+		// it is the specific one.
+		//
 		const heading = page
 			.locator(
-				`${menu.root} [role="button"]:has-text("${section}"), ` +
-					`${menu.root} button:has-text("${section}"), ` +
-					`${menu.root} a:has-text("${section}")`
+				[
+					within(menu.root, `[role="tab"]:has-text("${section}")`),
+					within(menu.root, `button:has-text("${section}")`),
+					within(menu.root, `[role="button"]:has-text("${section}")`),
+					within(menu.root, `a:has-text("${section}")`),
+				].join(', ')
 			)
 			.first();
 
-		if ((await heading.count()) &&
-			(await heading.getAttribute('aria-expanded')) !== 'true') {
+		//
+		// A tab says it is current with aria-selected; a disclosure says it
+		// with aria-expanded. Either means there is nothing to click.
+		//
+		if (await heading.count()) {
+			const current =
+				(await heading.getAttribute('aria-expanded').catch(() => null)) ===
+					'true' ||
+				(await heading.getAttribute('aria-selected').catch(() => null)) ===
+					'true';
 
-			await heading.click();
+			if (!current) {
+				//
+				// Allowed to fail. A section that will not take a click is
+				// not the end of the walk: the application's own link is
+				// often already in the panel, and looking is cheaper than
+				// giving up.
+				//
+				await heading
+					.click({timeout: 5000})
+					.catch(() => undefined);
 
-			await page.waitForTimeout(SETTLE);
+				await page.waitForTimeout(SETTLE);
+
+				//
+				// The tab's own contents have to arrive before the
+				// application inside it can be looked for.
+				//
+				await page
+					.locator(within(menu.root, `a:has-text("${application}")`))
+					.first()
+					.waitFor({state: 'attached', timeout: 8000})
+					.catch(() => undefined);
+			}
 		}
 	}
 
@@ -436,7 +640,7 @@ async function reachApplication(
 	if (
 		!section &&
 		!(await page
-			.locator(`${menu.root} a:has-text("${application}")`)
+			.locator(within(menu.root, `a:has-text("${application}")`))
 			.count()
 			.catch(() => 0))
 	) {
@@ -475,8 +679,11 @@ async function reachApplication(
 		const found = (
 			await page
 				.locator(
-					`${menu.root} a, ${menu.root} [role="tab"], ` +
-						`${menu.root} [role="button"][aria-expanded]`
+					[
+						within(menu.root, 'a'),
+						within(menu.root, '[role="tab"]'),
+						within(menu.root, '[role="button"][aria-expanded]'),
+					].join(', ')
 				)
 				.allInnerTexts()
 				.catch(() => [] as string[])
@@ -514,9 +721,11 @@ async function reachApplication(
 			//
 			await page
 				.locator(
-					`${menu.root} a:has-text("${name}"), ` +
-						`${menu.root} [role="tab"]:has-text("${name}"), ` +
-						`${menu.root} [role="button"]:has-text("${name}")`
+					[
+						within(menu.root, `a:has-text("${name}")`),
+						within(menu.root, `[role="tab"]:has-text("${name}")`),
+						within(menu.root, `[role="button"]:has-text("${name}")`),
+					].join(', ')
 				)
 				.first()
 				.click({timeout: 4000})
@@ -549,7 +758,7 @@ async function reachApplication(
 	//
 	const link = page
 		.locator(`a:text-is("${application}")`)
-		.or(page.locator(`${menu.root} a:has-text("${application}")`))
+		.or(page.locator(within(menu.root, `a:has-text("${application}")`)))
 		.first();
 
 	await expect(
@@ -557,7 +766,33 @@ async function reachApplication(
 		`the ${menuName} on this screen offers no application named "${application}"`
 	).toHaveCount(1, {timeout: 8000});
 
-	await link.click();
+	//
+	// Checked, not assumed.
+	//
+	// Clicking an application link and walking away left several exercises
+	// running on the home page while reporting the menu step done, so every
+	// later step failed naming a control that was never going to be there.
+	// The retry above only helps if this says when it did not work.
+	//
+	const before = await screenPrint(page);
+
+	//
+	// Followed rather than clicked, where the link says where it goes.
+	//
+	// A menu entry in Liferay is an ordinary anchor with a real href, and
+	// going there directly avoids everything that makes clicking one
+	// unreliable: the panel closing under the pointer, an overlay catching
+	// the click, a handler that has not bound yet. liferay-portal's own tests
+	// navigate by URL for the same reason.
+	//
+	const href = await link.getAttribute('href').catch(() => null);
+
+	if (href && /^https?:|^\//.test(href)) {
+		await page.goto(href);
+	}
+	else {
+		await link.click();
+	}
 
 	//
 		// Bounded, and allowed to fail. Liferay polls in the background, so
@@ -569,6 +804,21 @@ async function reachApplication(
 			.catch(() => undefined);
 
 	await page.waitForTimeout(SETTLE);
+
+	const arrived = Date.now() + CHANGE_TIMEOUT;
+
+	while (Date.now() < arrived) {
+		if ((await screenPrint(page)) !== before) {
+			return;
+		}
+
+		await page.waitForTimeout(250);
+	}
+
+	throw new Error(
+		`"${application}" was clicked in the ${menuName} and the screen did ` +
+			`not change, so the application did not open`
+	);
 }
 
 /**
@@ -1097,6 +1347,22 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 	return null;
 }
 
+/**
+ * A descendant selector applied to each alternative of a menu's root.
+ *
+ * `root` lists several class names because the menu is a dropdown on one
+ * release and a modal on another. Writing `${root} button` produces
+ * ".a button, .b, .c" - the comma ends the first selector, so every
+ * alternative after the first matches the container itself rather than the
+ * button inside it. Menu queries were silently matching the panel.
+ */
+function within(root: string, suffix: string): string {
+	return root
+		.split(',')
+		.map((one) => `${one.trim()} ${suffix}`)
+		.join(', ');
+}
+
 /** Close any menu panel standing over the screen. True if one was closed. */
 async function closeOpenMenus(page: Page): Promise<boolean> {
 	let closed = false;
@@ -1154,6 +1420,28 @@ async function scopesFor(page: Page): Promise<Array<Locator | Frame>> {
 	}
 
 	return scopes;
+}
+
+/** Close a picker once it holds what was asked for. */
+async function confirmSelection(page: Page) {
+	for (const name of ['Select', 'Add', 'Done', 'Choose']) {
+		for (const scope of await scopesFor(page)) {
+			const button = scope
+				.getByRole('button', {exact: true, name})
+				.first();
+
+			if (
+				(await button.count().catch(() => 0)) &&
+				(await button.isVisible().catch(() => false))
+			) {
+				await button.click({timeout: 4000}).catch(() => undefined);
+
+				await page.waitForTimeout(SETTLE * 2);
+
+				return;
+			}
+		}
+	}
 }
 
 /** The address plus the shape of the visible text, as a cheap fingerprint. */

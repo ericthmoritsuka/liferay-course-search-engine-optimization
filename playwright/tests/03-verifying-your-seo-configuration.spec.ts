@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {fill, openMenu, openPageSettings, press} from '../helpers/liferay';
+import {attach, fill, openMenu, openPageSettings, press, toggle} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
