@@ -76,3 +76,14 @@ together:
 
 The tests are generated from the lessons. Edit the lesson, regenerate, and
 commit the result - edits made directly to a test file are overwritten.
+
+## Before Changing The Helpers
+
+Read [LESSONS.md](LESSONS.md). It records what this engine learned from runs
+against real instances: which Liferay controls carry no name, where a modal
+hides a form, what differs between DXP releases, and which phrases in a lesson
+are not controls at all. Every rule in it was paid for by a test that passed
+while doing nothing, or failed while blaming the wrong thing.
+
+Add to it when a run teaches you something a future run would otherwise
+rediscover.

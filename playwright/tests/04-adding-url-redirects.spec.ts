@@ -55,7 +55,7 @@ test('Adding URL Redirects', async ({page}) => {
 	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 9. Click *Actions* (![](../../images/icon-actions.png)) for the entry and select *Create Redirect*.
-	await press(page, 'Actions', 'entry');
+	await press(page, 'Actions', 'entry', 'actions');
 	await press(page, 'Create Redirect');
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/14.png'});

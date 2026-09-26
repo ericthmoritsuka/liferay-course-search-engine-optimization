@@ -37,7 +37,7 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/01.png'});
 
 	// Step 4. Click *Actions* (![](../../images/icon-actions.png)) in the Application Bar and select *Configure*.
-	await press(page, 'Actions');
+	await press(page, 'Actions', undefined, 'actions');
 	await press(page, 'Configure');
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/02.png'});

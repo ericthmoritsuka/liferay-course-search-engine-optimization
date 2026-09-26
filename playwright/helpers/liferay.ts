@@ -1038,7 +1038,24 @@ async function reachApplication(
  * including an inert span, and raises nothing - so "the click did not throw"
  * is not the same as "the step was performed".
  */
-export async function press(page: Page, label: string, within?: string) {
+//
+// What a lesson's icon image is called, where that differs from the icon the
+// product draws. A lesson writes "*Actions* (![](.../icon-actions.png))", and
+// the button it means carries a vertical ellipsis rather than anything named
+// actions.
+//
+const ICON_NAMES: Record<string, string> = {
+	actions: 'ellipsis-v',
+	'applications-menu': 'grid',
+	'product-menu': 'bars',
+};
+
+export async function press(
+	page: Page,
+	label: string,
+	within?: string,
+	icon?: string
+) {
 	const before = await screenPrint(page);
 
 	const escaped = label.replace(/"/g, '\\"');
@@ -1411,6 +1428,75 @@ export async function press(page: Page, label: string, within?: string) {
 	}
 
 		await page.waitForTimeout(250);
+	}
+
+	//
+	// The icon the lesson drew, when nothing answers to the name.
+	//
+	// Some controls carry no text and no aria-label at all - the cog that
+	// configures a chart is one - so no search by name can reach them, and
+	// the step reads as naming a control the product does not have. The
+	// lesson does identify it though: it prints the icon beside the name, and
+	// that icon's file name is the icon the product draws.
+	//
+	if (icon) {
+		const drawn = ICON_NAMES[icon] || icon;
+
+		//
+		// Scoped the same way a named control is.
+		//
+		// An icon is a far weaker identifier than a name - a cog appears in
+		// several places on one screen - so searching the whole page for one
+		// and clicking the first match is how a step meant for a chart's
+		// settings reached something else entirely, and the tests after it
+		// found themselves signed out. Where the sentence named a row, the
+		// icon is looked for only inside it.
+		//
+		for (const frame of await scopesFor(page)) {
+			const scope: Locator | Frame = inside
+				? ((await (frame as Frame)
+						.locator?.(
+							`.form-group:has-text("${inside}"), ` +
+								`tr:has-text("${inside}"), ` +
+								`[role="row"]:has-text("${inside}"), ` +
+								`li:has-text("${inside}"), ` +
+								`.card:has-text("${inside}"), ` +
+								`section:has-text("${inside}")`
+						)
+						.last()
+						.count()
+						.catch(() => 0))
+					? (frame as Frame)
+							.locator(
+								`.form-group:has-text("${inside}"), ` +
+									`tr:has-text("${inside}"), ` +
+									`[role="row"]:has-text("${inside}"), ` +
+									`li:has-text("${inside}"), ` +
+									`.card:has-text("${inside}"), ` +
+									`section:has-text("${inside}")`
+							)
+							.last()
+					: frame)
+				: frame;
+
+			const control = scope
+				.locator(
+					`button:has(svg use[href$="#${drawn}"]), ` +
+						`[role="button"]:has(svg use[href$="#${drawn}"])`
+				)
+				.first();
+
+			if (
+				(await control.count().catch(() => 0)) &&
+				(await control.isVisible().catch(() => false))
+			) {
+				await control.click({timeout: 5000});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+		}
 	}
 
 	if (ambiguous && !seen) {
