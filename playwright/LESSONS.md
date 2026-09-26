@@ -30,6 +30,18 @@ returned. Several exercises ran their whole length on the home page while
 reporting the menu step done, and every later failure named a control that was
 never going to be there.
 
+**A selected tab is not an open tab.** Page Audit's *PageSpeed Insights* tab
+is marked selected at once and renders nothing until its data arrives. On the
+first open after a restart that took longer than the settle, so the capture
+showed an empty panel and the step passed. A tab now counts as open when the
+panel it controls has something in it.
+
+**The reverse also happens: a save that worked, reported as doing nothing.**
+A configuration dialog stays open after *Save*, its text does not change, and
+the page behind it is untouched until it closes - so the screen comparison
+failed a save that had persisted. The server accepting the POST is the
+effect, and it is stronger evidence than anything on the screen.
+
 The lesson: **verify the effect, not the action.** After a run, check the
 product - the page exists, the redirect answers 301, the user is in the list.
 
@@ -75,6 +87,16 @@ refuses to continue from a 404 and names the variable.
   and that icon's file name is the icon the product draws - so
   `icon-cog.png` finds `svg use[href$="#cog"]`. An icon is a weak identifier,
   so it is only ever searched inside the row the sentence named.
+- **A lesson sometimes names a control without emphasis**, because the
+  icon beside it stands in: "Click Page Audit (![Page Audit](...))". The
+  name is still what the button announces (`getByLabel('Page Audit')` in
+  portal's `contentPage.spec.ts`). Generic words - "the Right Arrow button"
+  - are a shape, not a name, and stay unperformed rather than guessed.
+- **A dual list box is two native multiple selects** with arrows named
+  `Transfer Item Left to Right` and `Transfer Item Right to Left` (Clay's
+  `ClayDualListBox`, as portal's `SiteSettingsLocalizationPage.ts` drives
+  it). Its options carry their scope - "Audience (Global)" - and a column
+  can be capped, which disables the arrow silently. Check the item arrived.
 - **Every row of a table keeps a hidden copy of its own menu.** Count only
   what is visible, or an unambiguous screen looks ambiguous.
 
@@ -97,6 +119,27 @@ These were all rendered as clicks on controls that do not exist.
 | "Right click and select *Inspect*" | Developer tools. Not performable - but see below |
 | "*Actions* for Christian Carter" | Scope to that row, or it acts on whoever is first |
 | "the *Language* button for Name" | Scope to the field's own `.form-group` |
+| "Use the *left arrow* to remove the *Audience* and *Stage* vocabularies" | Select those items in their column, then transfer. The arrow alone moves nothing |
+| "Click *Save* and close the modal window" | The dialog stays open after saving. Close it where the sentence does - "Close the modal window and click *Publish*" closes first |
+| "Since X is not configured... there's a button for setting it up" | The expected end state. Read the prose before calling an exercise unautomatable: PageSpeed Insights never calls Google here, it shows the setup screen |
+
+## The Course Starts Before Exercise One
+
+A course's environment setup lesson has no "Exercise:" heading, so it produced
+no test - and in 24 courses it ends by reindexing all search indexes. Every
+run therefore started from an empty index. Nothing failed where the setup was
+skipped: the Content Dashboard, five exercises later, listed one item and its
+Author picker said "No users were found" about a user who exists. The parser
+now reads a setup lesson's required sections as test `00`, and a failure that
+names a missing user, item, or result is first a question about the index.
+
+## State That Outlives A Test
+
+The database is reset between runs, not between exercises, and some state is
+not in the database at all. **Page Audit remembers it is open** for the
+signed-in user (`setSessionValue` in `layout-reports-web`), so it opens again
+on the next page load, and a later "Go to the *Home* page" can change nothing
+on the screen. Expect a panel a previous exercise opened to still be there.
 
 ## Verification Is The Half Worth Automating
 
@@ -111,6 +154,17 @@ the publish step had never opened the editor.
 
 ## Running It
 
+Everything below is automated by `run-live.sh` in the generator repository
+(`.claude/scripts/course-check/playwright`), and this engine lives there once:
+edit it there and run `sync-engine.sh <workspace>`, never edit a workspace
+copy. After changing the generator, run `check-generated.sh` - it shows what
+the change does to every course's tests. Its first run showed a fix for one
+course pressing *Publish* behind an open dialog in four steps of other courses.
+
+- **Wait for readiness as a guest.** Basic auth does not sign a page request
+  in, so a check for signed-in markup never succeeds. One did exactly that,
+  and spent five minutes of every run timing out.
+
 - **Reset the database between runs.** These exercises create things; a second
   run without a reset fails on what the first built, and every later failure
   becomes a guess. Restore `configs/local/data/hypersonic`, and **delete
@@ -124,6 +178,14 @@ the publish step had never opened the editor.
 - **Run the whole course before believing a fix.** A change that unblocks one
   module can break another: row scoping broke a passing test because
   "Reindex for All Search Indexes" is not a table row.
+- **So is the first click after a restart.** Reindex's confirmation opened
+  in 225ms warm and outlasted the ten second change timeout cold, and the
+  step failed with the dialog on the screen. The change check now keeps
+  waiting while the page is still fetching.
+- **Keep the evidence before running anything else.** Playwright empties
+  `test-results` at the start of every run, so a probe written to explain a
+  failure deleted that failure's trace. `run-live.sh` copies it into the
+  run's own folder.
 - **A picker is slow the first time.** Documents and Media on a freshly
   restored database takes far longer than an ordinary find timeout, which is
   why one step passed alone and failed in a suite.

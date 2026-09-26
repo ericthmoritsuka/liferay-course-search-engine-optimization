@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, verifyHead, visitAsGuest, visitInNewBrowser} from '../helpers/liferay';
+import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -31,15 +31,16 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 	await press(page, 'Configure', 'Content Chart', 'cog');
 
 	// Step 3. Use the *left arrow* (![](../../images/icon-caret-left.png)) to remove the *Audience* and *Stage* vocabularies
-	// Not performed: no control or value named in this step.
+	await transfer(page, 'left', ['Audience', 'Stage']);
 
 	// Step 4. Use the *right arrow* (![](../../images/icon-caret-right.png)) to add the *Job Positions* and *Region* vocabul
-	// Not performed: no control or value named in this step.
+	await transfer(page, 'right', ['Job Positions', 'Region']);
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/04.png'});
 
 	// Step 5. Click *Save* and close the modal window.
 	await press(page, 'Save');
+	await closeModal(page);
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/05.png'});
 

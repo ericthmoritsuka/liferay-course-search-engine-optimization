@@ -314,6 +314,164 @@ export async function toggle(page: Page, field: string, on: boolean) {
 }
 
 /**
+ * Move items between the two columns of a dual list box.
+ *
+ * A lesson writes "Use the *left arrow* to remove the *Audience* and *Stage*
+ * vocabularies", and the arrow alone does nothing: the items have to be
+ * selected in their column first. Each column is a native multiple select,
+ * and the arrows are named "Transfer Item Left to Right" and "Transfer Item
+ * Right to Left" - both taken from liferay-portal's own page objects
+ * (pages/site-admin-web/SiteSettingsLocalizationPage.ts), which address the
+ * columns by position and select options directly.
+ *
+ * An option reads "Audience (Global)" where the lesson says Audience, so the
+ * lesson's word matches the option's name or its name before the scope in
+ * brackets. Anything else matching is refused rather than resolved, for the
+ * same reason an ambiguous label is.
+ *
+ * The move is checked in the other column afterwards. The arrow is disabled
+ * when a column is full, and clicking a disabled arrow changes nothing and
+ * throws nothing.
+ */
+export async function transfer(
+	page: Page,
+	direction: 'left' | 'right',
+	items: string[]
+) {
+	const arrow =
+		direction === 'left'
+			? 'Transfer Item Right to Left'
+			: 'Transfer Item Left to Right';
+
+	for (const scope of await scopesFor(page)) {
+		const lists = scope.getByRole('listbox');
+
+		if ((await lists.count().catch(() => 0)) < 2) {
+			continue;
+		}
+
+		const source = lists.nth(direction === 'left' ? 1 : 0);
+		const target = lists.nth(direction === 'left' ? 0 : 1);
+
+		const options = await source
+			.locator('option')
+			.evaluateAll((all) =>
+				all.map((option) => ({
+					text: (option.textContent || '').trim(),
+					value: (option as HTMLOptionElement).value,
+				}))
+			);
+
+		const values = items.map((item) => {
+			const matches = options.filter(
+				(option) =>
+					option.text === item || option.text.startsWith(`${item} (`)
+			);
+
+			if (matches.length !== 1) {
+				throw new Error(
+					`"${item}" matches ${matches.length} items in the column ` +
+						`it should move from: ${options
+							.map((option) => option.text)
+							.join(', ')}`
+				);
+			}
+
+			return matches[0].value;
+		});
+
+		await source.selectOption(values);
+
+		await scope.getByLabel(arrow, {exact: true}).click({timeout: 5000});
+
+		for (const value of values) {
+			await expect(
+				target.locator(`option[value="${value}"]`)
+			).toHaveCount(1, {timeout: CHANGE_TIMEOUT});
+		}
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+
+	throw new Error(
+		`no pair of lists to move "${items.join('", "')}" between is on ` +
+			`this screen`
+	);
+}
+
+/**
+ * Wait for a reindex of all search indexes to finish.
+ *
+ * Execute starts it and returns at once; the index is built in the
+ * background. A reader waits without thinking about it - the setup lesson's
+ * last step is to take some time to explore the site - but a test goes
+ * straight on, and the first search-backed step of the course then races the
+ * reindex. Without the setup test at all, the Content Dashboard's Author
+ * picker said "No users were found" about a user who exists.
+ *
+ * The row shows a progress bar while it runs and its Reindex button again
+ * when it is done, which is how liferay-portal's SearchAdminPage.ts reads it.
+ * The bar is allowed not to appear: on a small database the reindex can
+ * finish before the first look.
+ */
+export async function waitForReindex(page: Page) {
+	const row = page
+		.locator('.index-actions-sheet .list-group-item')
+		.filter({hasText: 'All Search Indexes'})
+		.first();
+
+	await row
+		.locator('.progress')
+		.waitFor({state: 'visible', timeout: 15000})
+		.catch(() => undefined);
+
+	await row
+		.locator('.progress')
+		.waitFor({state: 'hidden', timeout: 15 * 60 * 1000});
+
+	await expect(row.getByRole('button', {name: 'Reindex'})).toBeVisible({
+		timeout: CHANGE_TIMEOUT,
+	});
+}
+
+/**
+ * Close the dialog standing over the screen.
+ *
+ * A configuration dialog stays open after Save - the save happens inside it
+ * and it says so there - which is why a lesson writes "Click *Save* and close
+ * the modal window". Pressing only Save left the dialog over the page, and the
+ * next step found its control on the screen and could not click it.
+ *
+ * Closing is checked by the dialog going away. A dialog that closed itself is
+ * already what the lesson asks for, so there being none open is not a failure.
+ */
+export async function closeModal(page: Page) {
+	for (const frame of [...page.frames()].reverse()) {
+		const dialog = frame
+			.locator('.modal.show, .modal.d-block, [role="dialog"]')
+			.last();
+
+		if (!(await dialog.isVisible().catch(() => false))) {
+			continue;
+		}
+
+		await dialog
+			.locator('button.close')
+			.or(dialog.getByRole('button', {exact: true, name: 'Close'}))
+			.first()
+			.click({timeout: 5000});
+
+		await dialog.waitFor({state: 'hidden', timeout: CHANGE_TIMEOUT});
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+}
+
+/**
  * Give a form a file the exercise keeps in the workspace.
  *
  * A step like "Settings > Image | Path: `.../quality-sunglasses-01.jpeg`"
@@ -1050,12 +1208,67 @@ const ICON_NAMES: Record<string, string> = {
 	'product-menu': 'bars',
 };
 
+//
+// When the server last accepted a POST from this page, per page.
+//
+// A save inside a configuration dialog changes nothing a reader can see: the
+// dialog stays open, its text stays the same, and the page behind it is not
+// touched until the dialog closes. Comparing the screen called a save that
+// worked a click that did nothing. The server accepting the request is the
+// effect, and stronger evidence than any change on the screen.
+//
+const acceptedPosts = new WeakMap<Page, number>();
+
+//
+// When the page last started or finished a request, per page.
+//
+// The first click after a restart can take longer than the change timeout
+// to show anything, because the code behind what it opens is fetched then
+// for the first time. Reindex's confirmation took 225ms warm and outlasted
+// ten seconds cold, so the step failed with the dialog it was waiting for on
+// the screen. A screen that has not changed while the page is still
+// fetching is not yet evidence of anything.
+//
+const lastActivity = new WeakMap<Page, number>();
+
+function watchPosts(page: Page) {
+	if (acceptedPosts.has(page)) {
+		return;
+	}
+
+	acceptedPosts.set(page, 0);
+	lastActivity.set(page, Date.now());
+
+	const touch = () => lastActivity.set(page, Date.now());
+
+	page.on('request', touch);
+	page.on('requestfailed', touch);
+	page.on('requestfinished', touch);
+
+	page.on('response', (response) => {
+		if (
+			response.request().method() === 'POST' &&
+			response.status() < 400
+		) {
+			acceptedPosts.set(page, Date.now());
+		}
+	});
+}
+
 export async function press(
 	page: Page,
 	label: string,
 	within?: string,
 	icon?: string
 ) {
+	watchPosts(page);
+
+	//
+	// When the named control was clicked. A POST accepted after it is the
+	// click's own; one accepted before it belongs to an earlier step.
+	//
+	let clickedAt = Number.POSITIVE_INFINITY;
+
 	const before = await screenPrint(page);
 
 	const escaped = label.replace(/"/g, '\\"');
@@ -1339,6 +1552,8 @@ export async function press(
 			// seconds, and a handful of those exhausts the whole test's
 			// budget before it reaches the step that matters.
 			//
+			clickedAt = Date.now();
+
 			await control.click({timeout: 4000});
 		}
 		catch (error) {
@@ -1386,12 +1601,30 @@ export async function press(
 		//
 		const deadline = Date.now() + CHANGE_TIMEOUT;
 
+		//
+		// Past the deadline only while the page is still fetching, and never
+		// past three times it. Liferay polls in the background, so a page
+		// that is never quiet waits the full limit - which only a step that
+		// is already failing pays.
+		//
+		const limit = Date.now() + CHANGE_TIMEOUT * 3;
+
 		let after = before;
 
-		while (Date.now() < deadline) {
+		while (true) {
 			after = await screenPrint(page);
 
 			if (after !== before) {
+				break;
+			}
+
+			const now = Date.now();
+
+			if (
+				now >= limit ||
+				(now >= deadline &&
+					now - (lastActivity.get(page) || 0) > 1500)
+			) {
 				break;
 			}
 
@@ -1416,12 +1649,53 @@ export async function press(
 			)
 			.catch(() => false);
 
-		if (!selected) {
+		const saved = (acceptedPosts.get(page) || 0) >= clickedAt;
+
+		if (!selected && !saved) {
 			expect(
 				after,
 				`"${label}" was pressed and nothing on the screen changed, so ` +
 					`whatever it was meant to open did not open`
 			).not.toBe(before);
+		}
+
+		//
+		// A tab is open when its panel has something in it, not when it is
+		// marked selected. Page Audit's PageSpeed Insights tab is selected at
+		// once and renders nothing until its data arrives, and on the first
+		// open after a restart that took longer than the settle - so the
+		// capture showed an empty panel and the step passed. The panel is the
+		// one the tab names in aria-controls, or else the visible tab panel.
+		//
+		if (selected && ((await control.getAttribute('role').catch(() => null)) === 'tab')) {
+			await expect
+				.poll(
+					() =>
+						control
+							.evaluate((node) => {
+								const id = node.getAttribute('aria-controls');
+
+								const panel = ((id &&
+									node.ownerDocument.getElementById(id)) ||
+									[
+										...node.ownerDocument.querySelectorAll(
+											'[role="tabpanel"]'
+										),
+									].find(
+										(one) =>
+											(one as HTMLElement).offsetParent !==
+											null
+									)) as HTMLElement | undefined;
+
+								return panel ? panel.innerText.trim().length : -1;
+							})
+							.catch(() => 0),
+					{
+						message: `the "${label}" tab opened but its panel stayed empty`,
+						timeout: CHANGE_TIMEOUT,
+					}
+				)
+				.not.toBe(0);
 		}
 
 		return;

@@ -42,6 +42,14 @@ from this workspace's baseline branch before a full run: a bundle that has
 already had the tests run against it is not the state the first exercise
 expects.
 
+## The Setup Test
+
+Test `00` is the course's environment setup lesson: the steps a reader does
+before exercise one. Its terminal steps are left to you - start the bundle
+yourself - and it performs the rest, which in most courses ends by reindexing
+all search indexes and waiting for that to finish. Every search-backed screen
+in the course depends on it, so run it first.
+
 ## When to Run Them
 
 - After upgrading this workspace to a new Liferay DXP release
@@ -54,7 +62,8 @@ that breaks a later one.
 ## What a Pass Means, and What It Does Not
 
 **A pass means nothing blocked a reader.** Every step named a control that was
-there, and pressing it changed the screen.
+there, and pressing it had an effect: the screen changed, a tab's panel filled
+in, or the server accepted what was saved.
 
 **It does not mean the exercise built the right thing.** Nothing here records
 what an exercise is supposed to produce, so a test cannot tell a site created
@@ -78,6 +87,11 @@ The tests are generated from the lessons. Edit the lesson, regenerate, and
 commit the result - edits made directly to a test file are overwritten.
 
 ## Before Changing The Helpers
+
+The helpers, this README, the configuration, and LESSONS.md are shared by every
+course workspace. The copies here are synced from one shared engine, and a
+sync refuses to overwrite a copy edited in place, so make a change in the
+shared engine rather than here.
 
 Read [LESSONS.md](LESSONS.md). It records what this engine learned from runs
 against real instances: which Liferay controls carry no name, where a modal

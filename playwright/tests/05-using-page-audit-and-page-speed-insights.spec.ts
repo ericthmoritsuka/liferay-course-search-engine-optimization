@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, verifyHead, visitAsGuest, visitInNewBrowser} from '../helpers/liferay';
+import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -29,9 +29,9 @@ test('Using Page Audit and Page Speed Insights', async ({page}) => {
 	await press(page, 'Home');
 
 	// Step 3. Click Page Audit (![Page Audit](../../images/icon-page-audit-tool.png)) in the Application Bar.
-	// Not performed: no control or value named in this step.
+	await press(page, 'Page Audit');
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/01.png'});
 
 	// Step 4. In the Performance tab, review all load times and mouse over each element to highlight it in the page.
 	// Not performed: no control or value named in this step.
