@@ -49,9 +49,20 @@ const LABEL_ALIASES: Record<string, string[]> = {
 		'Show Actions',
 		'Options',
 	],
-	Configure: ['Configuration'],
-	New: ['Add', 'Plus'],
 };
+
+//
+// Deliberately not here: Configure -> Configuration, and New -> Add.
+//
+// Both look reasonable and both are wrong. "Configuration" is a Site Menu
+// section, so aliasing Configure to it made a row's Configure action also
+// match a navigation link and leave the exercise on the wrong screen. "Add"
+// is the commit button on half the forms in the product, so aliasing New to
+// it would submit a form instead of opening one.
+//
+// An alias is only safe where the two names denote the same control. Where
+// they merely sound alike, the ambiguity check is the better answer.
+
 
 const MENUS: Record<string, {root: string; trigger: string}> = {
 	'Global Menu': {
@@ -348,7 +359,14 @@ export async function attach(page: Page, label: string, file: string) {
 		// opening it finds the screen underneath and concludes nothing here
 		// takes a file.
 		//
-		const deadline = Date.now() + (attempt ? FIND_TIMEOUT * 2 : 0);
+		//
+		// A generous budget on the second pass. The picker is Documents and
+		// Media in its own iframe, and on a freshly restored database it is
+		// being opened for the first time - measured at well over the
+		// ordinary find timeout, which is why this step passed when run on
+		// its own and failed in a suite that had just reset the instance.
+		//
+		const deadline = Date.now() + (attempt ? 45000 : 0);
 
 		do {
 			for (const scope of await scopesFor(page)) {
@@ -389,12 +407,46 @@ export async function attach(page: Page, label: string, file: string) {
 
 		await opener.click({timeout: 4000}).catch(() => undefined);
 
+		//
+		// Waited for the picker itself, so the polling below starts once
+		// there is something to poll.
+		//
+		await page
+			.locator('.modal.show, [role="dialog"], iframe')
+			.last()
+			.waitFor({state: 'visible', timeout: 20000})
+			.catch(() => undefined);
+
 		await page.waitForTimeout(SETTLE * 2);
 	}
 
+	//
+	// Said with what was actually there. "Nothing accepts a file" is true and
+	// useless; the screen it was looking at is what tells you whether the
+	// picker failed to open, opened somewhere unexpected, or opened fine and
+	// the upload control is named something else.
+	//
+	const saw = await page
+		.evaluate(() => {
+			const bits: string[] = [];
+
+			document
+				.querySelectorAll('.modal.show, [role="dialog"], iframe')
+				.forEach((node) => {
+					bits.push(
+						`${node.tagName}.${(node.className || '').toString().slice(0, 30)}`
+					);
+				});
+
+			return `${bits.join(' ')} | ${document.body.innerText
+				.replace(/\s+/g, ' ')
+				.slice(0, 120)}`;
+		})
+		.catch(() => 'the screen could not be read');
+
 	throw new Error(
 		`nothing on this screen accepts a file, so "${label}" could not be ` +
-			`given one - the picker may need a document that is already uploaded`
+			`given one. On screen: ${saw}`
 	);
 }
 
