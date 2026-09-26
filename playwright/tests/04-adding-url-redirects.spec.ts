@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, fill, openMenu, openPageSettings, press, toggle} from '../helpers/liferay';
+import {attach, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, verifyHead, visitAsGuest} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -50,9 +50,9 @@ test('Adding URL Redirects', async ({page}) => {
 	// Screenshot skipped: the step it belongs to was not performed.
 
 	// Step 8. Return to your previous browser window and refresh the page.
-	// Not performed: no control or value named in this step.
+	await goHome(page);
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/13.png'});
 
 	// Step 9. Click *Actions* (![](../../images/icon-actions.png)) for the entry and select *Create Redirect*.
 	await press(page, 'Actions', 'entry');

@@ -110,6 +110,8 @@ const FIND_TIMEOUT = 8000;
 //
 const CHANGE_TIMEOUT = 10000;
 
+const HOME = process.env.COURSE_HOME || '/web/clarity/home';
+
 const SETTLE = 900;
 
 /**
@@ -451,6 +453,88 @@ export async function attach(page: Page, label: string, file: string) {
 }
 
 /**
+ * Look at a page the way a reader who is not signed in would.
+ *
+ * A verification exercise says "log out and go to the page", and it means it:
+ * what Liferay renders into the head differs for an administrator, so
+ * checking while signed in checks the wrong document.
+ */
+export async function visitAsGuest(page: Page, address: string) {
+	await page.context().clearCookies();
+
+	await page.goto(address);
+
+	await page
+		.waitForLoadState('domcontentloaded', {timeout: 15000})
+		.catch(() => undefined);
+}
+
+/**
+ * Check what the page renders into its head.
+ *
+ * This is the half of search engine optimisation a browser test is actually
+ * good at, and it was the half being skipped: the lesson asks the reader to
+ * open developer tools and look, which no page script can do, so every
+ * verification step was recorded as unperformable and the exercise checked
+ * nothing at all.
+ *
+ * Opening devtools is not the point. Seeing the tags is, and they can be read
+ * from the document directly - which is stricter than looking, because it
+ * fails when a tag is present but empty.
+ */
+export async function verifyHead(
+	page: Page,
+	kind: 'canonical' | 'meta' | 'openGraph' | 'title'
+) {
+	const selectors: Record<string, string> = {
+		canonical: 'link[rel="canonical"]',
+		meta: 'meta[name="description"], meta[name="keywords"]',
+		openGraph: 'meta[property^="og:"]',
+		title: 'title',
+	};
+
+	const found = await page.evaluate((selector) => {
+		return Array.from(document.head.querySelectorAll(selector)).map(
+			(node) =>
+				node.getAttribute('content') ||
+				node.getAttribute('href') ||
+				node.textContent ||
+				''
+		);
+	}, selectors[kind]);
+
+	expect(
+		found.length,
+		`the page renders no ${kind} tag, so the exercise's configuration did ` +
+			`not reach what readers and search engines see`
+	).toBeGreaterThan(0);
+
+	expect(
+		found.filter((value) => value.trim()).length,
+		`the page renders a ${kind} tag but it is empty`
+	).toBeGreaterThan(0);
+}
+
+/**
+ * Go back to the course's own site.
+ *
+ * Several exercises do something in a global application - System Settings,
+ * the Control Panel - and then say "Return to Clarity Public Enterprise
+ * Website" before carrying on in the site's own menu. That step names no
+ * control because it is not one, so it was skipped, and every step after it
+ * ran against the global scope where the site's applications do not exist.
+ */
+export async function goHome(page: Page) {
+	await page.goto(HOME);
+
+	await page
+		.waitForLoadState('domcontentloaded', {timeout: 15000})
+		.catch(() => undefined);
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
  * Reach a page's configuration, for an exercise that continues from another.
  *
  * A lesson splits a long procedure across exercises and resumes with "While
@@ -464,11 +548,28 @@ export async function attach(page: Page, label: string, file: string) {
  * page's own Actions, then Configure.
  */
 export async function openPageSettings(page: Page, name: string) {
+	await openPageAction(page, name, 'Configure');
+}
+
+/**
+ * Open a page in the editor, for a step that says to begin editing it.
+ *
+ * "Begin editing the Quality Sunglasses page and click Publish" was rendered
+ * as the Publish alone, so Publish was pressed from wherever the browser
+ * happened to be and the page stayed a draft. Everything the exercise then
+ * verifies is served from a URL that answers 404.
+ */
+export async function openPageEditor(page: Page, name: string) {
+	await openPageAction(page, name, 'Edit');
+}
+
+/** The Pages application, one page's own menu, and one action from it. */
+async function openPageAction(page: Page, name: string, action: string) {
 	await openMenu(page, 'Site Menu', 'Site Builder', 'Pages');
 
 	await press(page, 'Actions', name);
 
-	await press(page, 'Configure');
+	await press(page, action);
 }
 
 /**
