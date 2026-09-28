@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -50,9 +50,9 @@ test('Adding URL Redirects', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/12.png'});
 
 	// Step 8. Return to your previous browser window and refresh the page.
-	// Not performed: no control or value named in this step.
+	await reload(page);
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/13.png'});
 
 	// Step 9. Click *Actions* (![](../../images/icon-actions.png)) for the entry and select *Create Redirect*.
 	await press(page, 'Actions', 'entry', 'actions');

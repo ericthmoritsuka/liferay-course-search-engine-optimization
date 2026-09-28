@@ -31,16 +31,40 @@ reporting the menu step done, and every later failure named a control that was
 never going to be there.
 
 **A selected tab is not an open tab.** Page Audit's *PageSpeed Insights* tab
-is marked selected at once and renders nothing until its data arrives. On the
-first open after a restart that took longer than the settle, so the capture
-showed an empty panel and the step passed. A tab now counts as open when the
-panel it controls has something in it.
+is marked selected at once and its pane fades in afterwards, so the capture
+showed an empty panel and the step passed. The first fix - count the tab open
+once its panel has text - was itself vacuous, and was recorded here as fixed:
+a hidden pane still reports all of its text, so the check passed before the
+pane appeared. A tab now counts as open when its pane is rendered, fully faded
+in, and has text. Prove a new check fails on the defect before writing it down
+as a fix.
 
 **The reverse also happens: a save that worked, reported as doing nothing.**
 A configuration dialog stays open after *Save*, its text does not change, and
 the page behind it is untouched until it closes - so the screen comparison
 failed a save that had persisted. The server accepting the POST is the
 effect, and it is stronger evidence than anything on the screen.
+
+**A green suite hid six failures until it was audited.** Three independent
+auditors, one per slice of the course, each read the lesson, the test, the
+run's captures beside the lesson's images, and the live product. Every test had
+passed. They found: the English page serving the Spanish SEO title and
+keywords; both descriptions never typed; a head check that could not fail; the
+tab check above; an Export XLS that saves an HTML error page under a success
+toast (a product defect - the server overflows its stack); and the
+Accessibility Menu's own steps never run. Audit a suite this way before
+presenting it as correct. Give each auditor its own Playwright config and
+output folder, or one probe empties another's evidence.
+
+**Presence proves nothing about the head.** Liferay renders a title, a
+canonical link, and og: tags on every page, configured or not. `verifyHead`
+checks the values the course set: the title contains the HTML Title, and every
+other tag equals its value exactly.
+
+**A success toast is not a download.** Content Dashboard reports "XLS was
+successfully generated." when the server has answered 500: its fetch never
+checks the response. `download` checks the saved file - it exists, is not
+HTML, and starts with its type's signature.
 
 The lesson: **verify the effect, not the action.** After a run, check the
 product - the page exists, the redirect answers 301, the user is in the list.
@@ -97,6 +121,20 @@ refuses to continue from a 404 and names the variable.
   `ClayDualListBox`, as portal's `SiteSettingsLocalizationPage.ts` drives
   it). Its options carry their scope - "Audience (Global)" - and a column
   can be capped, which disables the arrow silently. Check the item arrived.
+- **A switch can update after the click returns.** The Accessibility Menu's
+  options are `role="switch"` checkboxes that turn on a moment later, so
+  `check()` reports that clicking changed nothing. Click, then wait for the
+  switch to read checked - and address switches by position, because a
+  selector for unchecked ones moves to the next the moment one turns on.
+- **A localized field is one input with its own language button.** The
+  button is `.input-localized-trigger` in the field's `.form-group`; it opens
+  a menu of `a[role="menuitem"]` entries carrying `data-languageid="es_ES"`
+  and reading "es-ES Not Translated", and afterwards reads the locale shown.
+  Switching the first language button on the page, and returning quietly when
+  no option read "Spanish", typed every SEO value into English.
+- **A lesson's value can be long.** Values in backticks were capped at 80
+  characters, so both 87- and 106-character descriptions were silently
+  reported as "chosen from a control" and never typed.
 - **Every row of a table keeps a hidden copy of its own menu.** Count only
   what is visible, or an unambiguous screen looks ambiguous.
 
@@ -121,6 +159,10 @@ These were all rendered as clicks on controls that do not exist.
 | "the *Language* button for Name" | Scope to the field's own `.form-group` |
 | "Use the *left arrow* to remove the *Audience* and *Stage* vocabularies" | Select those items in their column, then transfer. The arrow alone moves nothing |
 | "Click *Save* and close the modal window" | The dialog stays open after saving. Close it where the sentence does - "Close the modal window and click *Publish*" closes first |
+| "Refresh the browser window and hit the Tab key twice" | A reload, then keys. The Accessibility Menu's entry point exists only for keyboard users |
+| "In the second browser tab, refresh the page" | Not performable: the engine drives one page, and reloading it refreshes the wrong one |
+| "Enable some of the options, close the menu, and verify the changes" | Turn on two, close, and check the page body's classes changed |
+| "Create these three FAQ articles:" + a table whose first column is values | Items to create, one per row - not fields named by the first cell |
 | "Since X is not configured... there's a button for setting it up" | The expected end state. Read the prose before calling an exercise unautomatable: PageSpeed Insights never calls Google here, it shows the setup screen |
 
 ## The Course Starts Before Exercise One
@@ -140,6 +182,18 @@ not in the database at all. **Page Audit remembers it is open** for the
 signed-in user (`setSessionValue` in `layout-reports-web`), so it opens again
 on the next page load, and a later "Go to the *Home* page" can change nothing
 on the screen. Expect a panel a previous exercise opened to still be there.
+
+Also seen and not reproduced alone: page settings stopped answering - even
+counting elements hung - while three auditors drove the instance at once. The
+same screens answered normally afterwards, before and after the Accessibility
+Menu exercise. The console's "Failed to execute 'removeChild'" error appears
+either way and is harmless. Do not report it as a product defect without a
+repeat on an otherwise idle instance.
+
+Seen once and not reproduced: on a fresh database the *Add Page* dialog
+rendered Clarity's 404 page inside its frame, so there was no Name field. The
+next run from the same reset passed. If it recurs, the failure capture shows
+the broken glasses.
 
 ## Verification Is The Half Worth Automating
 

@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -38,7 +38,8 @@ test('Verifying Your SEO Configuration', async ({page}) => {
 	// Not performed: this step uses the browser's own developer tools, which a page cannot open.
 
 	// Step 5. Verify the correct values appear for the title and meta tags.
-	await verifyHead(page, 'title');
+	await verifyHead(page, 'title', {'title': 'Quality sunglasses for men and women, aviator, wayfarer and cat-eye'});
+	await verifyHead(page, 'meta', {'meta[name="description"]': 'This page contains quality sunglasses for men and women, aviator, wayfarer and cat-eye ', 'meta[name="keywords"]': 'quality sunglasess, aviator, wayfarer, cat-eye '});
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/07.png'});
 
@@ -50,7 +51,8 @@ test('Verifying Your SEO Configuration', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/09.png'});
 
 	// Step 7. Verify the Open Graph and custom `<meta>` tags appear.
-	await verifyHead(page, 'openGraph');
+	await verifyHead(page, 'openGraph', {'meta[property="og:description"]': 'Explore our new collection of quality sunglasses: aviator, wayfarer, and cat-eye styles for men and women.', 'meta[property="og:image:alt"]': 'Collection of aviator, wayfarer, and cat-eye sunglasses.', 'meta[property="og:title"]': 'Discover Quality Sunglasses for Men and Women', 'meta[property="viewport"]': 'width=device-width, initial-scale=1'});
+	await verifyHead(page, 'meta', {'meta[name="description"]': 'This page contains quality sunglasses for men and women, aviator, wayfarer and cat-eye ', 'meta[name="keywords"]': 'quality sunglasess, aviator, wayfarer, cat-eye '});
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/10.png'});
 

@@ -142,18 +142,6 @@ export async function fill(
 		await openSection(page, where.section);
 	}
 
-	//
-	// The locale the value belongs to.
-	//
-	// A localised field renders one input per language, all carrying the same
-	// label. Typing by label alone puts the Spanish text in the English box
-	// and then reads it back successfully - a wrong result that reports
-	// itself as a right one, which is the worst thing this can do.
-	//
-	if (where.language) {
-		await chooseLanguage(page, where.language);
-	}
-
 	const input = await findField(page, field);
 
 	expect(
@@ -163,6 +151,22 @@ export async function fill(
 				`screen, in any frame`
 			: `no field named "${field}" is on this screen, in any frame`
 	).not.toBeNull();
+
+	//
+	// The locale the value belongs to, switched on this field's own language
+	// button after the field is found.
+	//
+	// A localised field is one input whose language button swaps the value it
+	// shows. Typing by label alone puts the Spanish text in the English box and
+	// then reads it back successfully - a wrong result that reports itself as a
+	// right one. That happened: the switch clicked whichever language button
+	// came first on the page and returned quietly when no option read
+	// "Spanish", so the SEO tab's English title and keywords were overwritten
+	// with the Spanish ones and the test passed.
+	//
+	if (where.language) {
+		await chooseLanguage(page, where.language, input!);
+	}
 
 	await input!.scrollIntoViewIfNeeded({timeout: 4000}).catch(() => undefined);
 
@@ -227,42 +231,80 @@ async function openSection(page: Page, section: string) {
 	}
 }
 
-/** Switch a localisable form to the language a value belongs to. */
-async function chooseLanguage(page: Page, language: string) {
-	const escaped = language.replace(/"/g, '\\"');
+/**
+ * What a lesson calls a language, as the locale id Liferay's language menu
+ * carries. A lesson may also name the locale itself, "es-ES".
+ */
+const LOCALES: Record<string, string> = {
+	Arabic: 'ar-SA',
+	Catalan: 'ca-ES',
+	Chinese: 'zh-CN',
+	Dutch: 'nl-NL',
+	English: 'en-US',
+	Finnish: 'fi-FI',
+	French: 'fr-FR',
+	German: 'de-DE',
+	Hungarian: 'hu-HU',
+	Japanese: 'ja-JP',
+	Portuguese: 'pt-BR',
+	Spanish: 'es-ES',
+	Swedish: 'sv-SE',
+};
 
-	for (const frame of page.frames()) {
-		const selector = frame
-			.locator(
-				'[data-qa-id="languageSelector"], [aria-label*="anguage"], ' +
-					'button[class*="language"], .language-flags button'
-			)
-			.first();
+/**
+ * Switch one localized field to the language a value belongs to.
+ *
+ * The field's own language button - .input-localized-trigger in its
+ * .form-group - opens a menu of a[role="menuitem"] entries carrying
+ * data-languageid (es_ES) and reading "es-ES Not Translated". The button then
+ * reads the locale it shows, which is what proves the switch happened.
+ */
+async function chooseLanguage(page: Page, language: string, input: Locator) {
+	const locale = /^[a-z]{2}[-_][A-Z]{2}$/.test(language)
+		? language.replace('_', '-')
+		: LOCALES[language];
 
-		if (!(await selector.count().catch(() => 0))) {
-			continue;
-		}
+	if (!locale) {
+		throw new Error(
+			`"${language}" is not a language this knows the locale of - add it ` +
+				`to LOCALES`
+		);
+	}
 
-		await selector.click({timeout: 4000}).catch(() => undefined);
+	const trigger = input
+		.locator(
+			'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " form-group ")][1]'
+		)
+		.locator('.input-localized-trigger')
+		.first();
 
-		await page.waitForTimeout(SETTLE);
+	await expect(
+		trigger,
+		`the field has no language button, so a ${language} value cannot be ` +
+			`put in its own locale`
+	).toBeVisible({timeout: FIND_TIMEOUT});
 
-		const option = frame
-			.locator(
-				`[role="menuitem"]:has-text("${escaped}"), ` +
-					`[role="option"]:has-text("${escaped}"), ` +
-					`button:has-text("${escaped}"), a:has-text("${escaped}")`
-			)
-			.first();
-
-		if (await option.count().catch(() => 0)) {
-			await option.click({timeout: 4000}).catch(() => undefined);
-
-			await page.waitForTimeout(SETTLE);
-		}
-
+	if (((await trigger.textContent()) || '').trim() === locale) {
 		return;
 	}
+
+	await trigger.click({timeout: 5000});
+
+	const option = input
+		.locator('xpath=ancestor::body[1]')
+		.locator(
+			`.lfr-icon-menu-open a[role="menuitem"][data-languageid="${locale.replace('-', '_')}"]`
+		)
+		.last();
+
+	await option.click({timeout: 5000});
+
+	await expect(
+		trigger,
+		`the field's language button did not switch to ${locale}`
+	).toHaveText(locale, {timeout: 5000});
+
+	await page.waitForTimeout(SETTLE / 3);
 }
 
 /**
@@ -399,6 +441,170 @@ export async function transfer(
 		`no pair of lists to move "${items.join('", "')}" between is on ` +
 			`this screen`
 	);
+}
+
+/**
+ * Reload the page, as "Refresh the browser window" asks.
+ */
+export async function reload(page: Page) {
+	await page.reload({waitUntil: 'load'});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Press a key some number of times, as "hit the Tab key twice" asks.
+ *
+ * Checked by focus moving. The Accessibility Menu's entry point is a button
+ * that exists only for keyboard users - it appears when Tab reaches it - so a
+ * lesson reaches it with keys, and a Tab that moved focus nowhere means the
+ * page never offered it.
+ */
+export async function pressKeys(page: Page, key: string, times = 1) {
+	const focused = () =>
+		page.evaluate(() => {
+			const active = document.activeElement;
+
+			return active ? active.outerHTML.slice(0, 200) : '';
+		});
+
+	const before = await focused();
+
+	for (let index = 0; index < times; index++) {
+		await page.keyboard.press(key);
+
+		await page.waitForTimeout(250);
+	}
+
+	if (key === 'Tab') {
+		expect(
+			await focused(),
+			`pressing Tab ${times} time(s) moved focus nowhere`
+		).not.toBe(before);
+	}
+}
+
+/**
+ * Turn on some of the options in the open dialog, close it, and check the
+ * page changed, as "Enable some of the options, close the menu, and verify
+ * the changes on the page" asks.
+ *
+ * Two options, because "some" is not one. The Accessibility Menu's switches
+ * each add a class to the page body (liferay-portal's AccessibilitySettingsUtil
+ * names them, c-prefers-link-underline and the like), so the body's classes
+ * before and after are the change a reader would see.
+ */
+export async function enableSomeOptions(page: Page) {
+	const bodyClasses = () => page.evaluate(() => document.body.className);
+
+	const before = await bodyClasses();
+
+	const dialog = page
+		.locator('.modal.show, .modal.d-block, [role="dialog"]')
+		.last();
+
+	await expect(dialog, 'no dialog is open to choose options in').toBeVisible({
+		timeout: FIND_TIMEOUT,
+	});
+
+	//
+	// Rendered after the dialog opens, so waited for; and addressed by
+	// position, because a selector for unchecked switches moves to the next
+	// one the moment the first is turned on. Clicked rather than checked: the
+	// switch updates after the click returns, and check() reads its state at
+	// once and reports that clicking changed nothing.
+	//
+	const switches = dialog.locator('[role="switch"], input[type="checkbox"]');
+
+	await expect(switches.first(), 'the open dialog offers no options').toBeVisible(
+		{timeout: FIND_TIMEOUT}
+	);
+
+	const unchecked: number[] = [];
+
+	for (let index = 0; index < (await switches.count()); index++) {
+		if (!(await switches.nth(index).isChecked())) {
+			unchecked.push(index);
+		}
+	}
+
+	if (unchecked.length < 2) {
+		throw new Error(
+			`the open dialog offers ${unchecked.length} option(s) to turn on, ` +
+				`not some`
+		);
+	}
+
+	for (const index of unchecked.slice(0, 2)) {
+		const option = switches.nth(index);
+
+		await option.click({timeout: 5000});
+
+		await expect(option, 'an option did not turn on').toBeChecked({
+			timeout: 5000,
+		});
+	}
+
+	await closeModal(page);
+
+	expect(
+		await bodyClasses(),
+		'turning options on changed nothing on the page'
+	).not.toBe(before);
+}
+
+/**
+ * Press a control that downloads a file, and check the file is real.
+ *
+ * Content Dashboard's Export XLS showed "XLS was successfully generated."
+ * while the server answered 500 and the browser saved an HTML redirect page
+ * under a .xls name. The toast changed the screen, so a plain press passed.
+ * The file is the effect the lesson promises, so the file is what is checked:
+ * it must exist, not be HTML, and carry the signature of its type - the export
+ * writes an Apache POI HSSFWorkbook, and every such .xls opens with the OLE2
+ * header D0 CF 11 E0.
+ */
+export async function download(page: Page, label: string) {
+	const [file] = await Promise.all([
+		page.waitForEvent('download', {timeout: CHANGE_TIMEOUT * 3}),
+		press(page, label),
+	]);
+
+	const name = file.suggestedFilename();
+
+	const saved = await file.path();
+
+	const bytes = fs.readFileSync(saved);
+
+	if (!bytes.length) {
+		throw new Error(`"${label}" downloaded ${name}, and it is empty`);
+	}
+
+	if (bytes.subarray(0, 64).toString('latin1').trimStart().startsWith('<')) {
+		throw new Error(
+			`"${label}" downloaded ${name}, but it is an HTML page, not the ` +
+				`file the lesson promises - the server most likely failed ` +
+				`while the page reported success`
+		);
+	}
+
+	const signatures: Record<string, string> = {
+		docx: '504b0304',
+		xls: 'd0cf11e0',
+		xlsx: '504b0304',
+		zip: '504b0304',
+	};
+
+	const extension = path.extname(name).slice(1).toLowerCase();
+
+	const expected = signatures[extension];
+
+	if (expected && bytes.subarray(0, 4).toString('hex') !== expected) {
+		throw new Error(
+			`"${label}" downloaded ${name}, but it does not start like a ` +
+				`.${extension} file does`
+		);
+	}
 }
 
 /**
@@ -689,7 +895,8 @@ export async function visitInNewBrowser(page: Page, address: string) {
  */
 export async function verifyHead(
 	page: Page,
-	kind: 'canonical' | 'meta' | 'openGraph' | 'title'
+	kind: 'canonical' | 'meta' | 'openGraph' | 'title',
+	expected: Record<string, string> = {}
 ) {
 	const selectors: Record<string, string> = {
 		canonical: 'link[rel="canonical"]',
@@ -718,6 +925,44 @@ export async function verifyHead(
 		found.filter((value) => value.trim()).length,
 		`the page renders a ${kind} tag but it is empty`
 	).toBeGreaterThan(0);
+
+	//
+	// The values the course set, checked one by one. Presence alone proved
+	// nothing: Liferay renders a title, a canonical link, and og: tags on every
+	// page, configured or not, so this passed on a page whose English title was
+	// the Spanish one and which had no description at all. The title is matched
+	// by containment because Liferay appends the site and company names to it;
+	// every other tag must carry exactly the value the lesson gave.
+	//
+	for (const [selector, value] of Object.entries(expected)) {
+		const actual = await page.evaluate((one) => {
+			const node = document.head.querySelector(one);
+
+			if (!node) {
+				return null;
+			}
+
+			return node.getAttribute('content') ?? node.textContent ?? '';
+		}, selector);
+
+		expect(
+			actual,
+			`the page renders no ${selector}, which the course set to "${value}"`
+		).not.toBeNull();
+
+		if (selector === 'title') {
+			expect(
+				actual!.trim(),
+				`the page title does not carry the HTML Title the course set`
+			).toContain(value.trim());
+		}
+		else {
+			expect(
+				actual!.trim(),
+				`${selector} is not the value the course set`
+			).toBe(value.trim());
+		}
+	}
 }
 
 /**
@@ -1640,12 +1885,19 @@ export async function press(
 		// a working click as a click that did nothing. What the control says
 		// about itself is the better evidence here.
 		//
+		//
+		// Bounded. A control the click removed - a menu item, a dialog's
+		// button - cannot answer, and an unbounded read waited out the whole
+		// action timeout for it: fifteen seconds after every Select.
+		//
 		const selected = await control
 			.evaluate(
 				(node) =>
 					node.getAttribute('aria-selected') === 'true' ||
 					node.getAttribute('aria-expanded') === 'true' ||
-					node.classList.contains('active')
+					node.classList.contains('active'),
+				undefined,
+				{timeout: 1000}
 			)
 			.catch(() => false);
 
@@ -1660,12 +1912,14 @@ export async function press(
 		}
 
 		//
-		// A tab is open when its panel has something in it, not when it is
-		// marked selected. Page Audit's PageSpeed Insights tab is selected at
-		// once and renders nothing until its data arrives, and on the first
-		// open after a restart that took longer than the settle - so the
-		// capture showed an empty panel and the step passed. The panel is the
-		// one the tab names in aria-controls, or else the visible tab panel.
+		// A tab is open when its panel is shown and has something in it, not
+		// when it is marked selected. Page Audit's PageSpeed Insights tab is
+		// selected at once, and its pane fades in afterwards - so the capture
+		// showed an empty panel and the step passed. Reading the pane's text
+		// was not enough either: a hidden pane still reports all of it, which
+		// made the first version of this check pass before the pane appeared.
+		// The panel is the one the tab names in aria-controls, or else the
+		// visible tab panel, and it must be rendered and fully shown.
 		//
 		if (selected && ((await control.getAttribute('role').catch(() => null)) === 'tab')) {
 			await expect
@@ -1687,7 +1941,17 @@ export async function press(
 											null
 									)) as HTMLElement | undefined;
 
-								return panel ? panel.innerText.trim().length : -1;
+								if (!panel) {
+									return -1;
+								}
+
+								const shown =
+									panel.offsetParent !== null &&
+									getComputedStyle(panel).opacity === '1' &&
+									(!panel.classList.contains('fade') ||
+										panel.classList.contains('show'));
+
+								return shown ? panel.innerText.trim().length : 0;
 							})
 							.catch(() => 0),
 					{

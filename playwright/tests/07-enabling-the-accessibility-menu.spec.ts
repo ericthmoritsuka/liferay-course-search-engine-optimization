@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -36,16 +36,17 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 	await press(page, 'Home');
 
 	// Step 4. Refresh the browser window and hit the Tab key twice.
-	// Not performed: no control or value named in this step.
+	await reload(page);
+	await pressKeys(page, 'Tab', 2);
 
 	// Step 5. Once the "Open Accessibility Menu" button appears, hit Enter or click it.
-	// Not performed: no control or value named in this step.
+	await press(page, 'Open Accessibility Menu');
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/09.png'});
 
 	// Step 6. Enable some of the options, close the menu, and verify the changes on the page.
-	// Not performed: no control or value named in this step.
+	await enableSomeOptions(page);
 
-	// Screenshot skipped: the step it belongs to was not performed.
+	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/10.png'});
 
 });

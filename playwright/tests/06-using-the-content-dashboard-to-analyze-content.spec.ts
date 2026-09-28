@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -56,7 +56,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/06.png'});
 
 	// Step 8. Click *Export XLS* to download a spreadsheet report of Walter Douglas's content.
-	await press(page, 'Export XLS');
+	await download(page, 'Export XLS');
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/07.png'});
 

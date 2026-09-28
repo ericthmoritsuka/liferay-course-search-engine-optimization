@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -55,9 +55,10 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 	await press(page, 'SEO');
 	await fill(page, 'HTML Title', 'Quality sunglasses for men and women, aviator, wayfarer and cat-eye', {language: 'English', section: 'Settings'});
 	await fill(page, 'HTML Title', 'Gafas de sol de calidad para hombre y mujer, aviador, wayfarer y cat-eye', {language: 'Spanish', section: 'Settings'});
+	await fill(page, 'Description', 'This page contains quality sunglasses for men and women, aviator, wayfarer and cat-eye ', {language: 'English', section: 'Settings'});
+	await fill(page, 'Description', 'Esta página contiene gafas de sol de calidad para hombre y mujer, aviador, wayfarer y cat-eye', {language: 'Spanish', section: 'Settings'});
 	await fill(page, 'Keywords', 'quality sunglasess, aviator, wayfarer, cat-eye ', {language: 'English', section: 'Settings'});
 	await fill(page, 'Keywords', 'gafas de sol de calidad, aviador, wayfarer, cat-eye', {language: 'Spanish', section: 'Settings'});
-	// Not entered: Settings > Description - chosen from a control rather than typed.
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/03.png'});
 

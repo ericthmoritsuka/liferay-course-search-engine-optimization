@@ -10,7 +10,7 @@
  */
 import {test} from '@playwright/test';
 
-import {attach, closeModal, fill, goHome, openMenu, openPageEditor, openPageSettings, press, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
 import {CAPTURE, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
@@ -37,7 +37,7 @@ test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 	await toggle(page, 'Use Custom Description', true);
 	await fill(page, 'Image Alt Description', 'Collection of aviator, wayfarer, and cat-eye sunglasses.', {section: 'Settings'});
 	await fill(page, 'Custom Title', 'Discover Quality Sunglasses for Men and Women', {section: 'Settings'});
-	// Not entered: Settings > Custom Description - chosen from a control rather than typed.
+	await fill(page, 'Custom Description', 'Explore our new collection of quality sunglasses: aviator, wayfarer, and cat-eye styles for men and women.', {section: 'Settings'});
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/04.png'});
 
