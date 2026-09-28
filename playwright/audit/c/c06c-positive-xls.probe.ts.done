@@ -1,0 +1,47 @@
+// READ-ONLY probe: a search filter only, never Save or Update.
+// Positive control for download(): a Content Dashboard export whose rows are
+// documents only (no Date-valued display-date), so the server should write a
+// real HSSFWorkbook, and download() should accept it.
+import {test} from '@playwright/test';
+import * as fs from 'fs';
+
+import {download, openMenu} from '../../helpers/liferay';
+import {signIn} from '../../helpers/sign-in';
+
+test('c06c download() accepts a genuine xls', async ({page}) => {
+	test.setTimeout(240000);
+	await signIn(page, 'admin');
+	await openMenu(page, 'Global Menu', 'Applications', 'Content Dashboard');
+
+	const box = page.getByRole('searchbox', {name: 'Search for:'});
+	await box.fill('img1714609821457');
+	await box.press('Enter');
+	await page.waitForLoadState('networkidle').catch(() => undefined);
+	await page.waitForTimeout(2000);
+
+	console.log('CONTENT_TITLE', JSON.stringify(await page.locator('h2').allInnerTexts()));
+	console.log('TYPES', JSON.stringify(await page.locator('table tbody tr td:nth-child(4)').allInnerTexts()));
+
+	let captured = '';
+	page.on('download', async (d) => {
+		const p = await d.path();
+		const b = fs.readFileSync(p);
+		captured = `${d.suggestedFilename()} ${b.length} bytes, head ${b.subarray(0, 8).toString('hex')}`;
+	});
+	page.on('response', (r) => {
+		if (/get_content_dashboard_items_xls/.test(r.url())) {
+			console.log('XLS_RESPONSE', r.status(), r.headers()['content-type']);
+		}
+	});
+
+	let result = 'PASSED';
+	try {
+		await download(page, 'Export XLS');
+	}
+	catch (error) {
+		result = `THREW ${(error as Error).message}`;
+	}
+	await page.waitForTimeout(1000);
+	console.log('DOWNLOAD', captured);
+	console.log('DOWNLOAD_HELPER', result);
+});

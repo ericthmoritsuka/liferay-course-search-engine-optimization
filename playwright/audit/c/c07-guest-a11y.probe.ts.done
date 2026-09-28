@@ -1,0 +1,66 @@
+// READ-ONLY guest probe: never signs in, never presses Save or Update.
+// Toggling Accessibility Menu options as a guest is stored in this
+// throwaway browser context's localStorage only.
+import {expect, test} from '@playwright/test';
+
+import {closeModal, enableSomeOptions, press, pressKeys, reload} from '../../helpers/liferay';
+
+const body = (page) => page.evaluate(() => document.body.className);
+const active = (page) =>
+	page.evaluate(() => {
+		const a = document.activeElement;
+		return a ? `${a.tagName} ${(a.textContent || '').trim().slice(0, 40)} ${a.getAttribute('aria-label') || ''}` : '';
+	});
+
+test('c07 vacuity: open and close the menu with nothing toggled', async ({page}) => {
+	await page.goto('/web/clarity/home');
+	await page.waitForLoadState('networkidle').catch(() => undefined);
+	await page.waitForTimeout(2000);
+
+	const button = page.getByRole('button', {exact: true, name: 'Open Accessibility Menu'});
+	console.log('BUTTON_COUNT', await button.count());
+	console.log('BUTTON_VISIBLE_BEFORE_TAB', await button.isVisible().catch(() => 'err'));
+	console.log('BUTTON_BOX_BEFORE_TAB', JSON.stringify(await button.boundingBox().catch(() => null)));
+
+	console.log('BODY_0', await body(page));
+
+	await reload(page);
+	await page.waitForTimeout(1500);
+	console.log('ACTIVE_AFTER_RELOAD', await active(page));
+	await page.keyboard.press('Tab');
+	await page.waitForTimeout(250);
+	console.log('ACTIVE_TAB1', await active(page));
+	await page.keyboard.press('Tab');
+	await page.waitForTimeout(250);
+	console.log('ACTIVE_TAB2', await active(page));
+	console.log('BUTTON_BOX_AFTER_TAB', JSON.stringify(await button.boundingBox().catch(() => null)));
+
+	await press(page, 'Open Accessibility Menu');
+	await page.waitForTimeout(1000);
+
+	const bodyOpen = await body(page);
+	console.log('BODY_OPEN', bodyOpen);
+
+	const dialog = page.locator('.modal.show, .modal.d-block, [role="dialog"]').last();
+	console.log('DIALOG_VISIBLE', await dialog.isVisible());
+	console.log('SWITCHES', await dialog.locator('[role="switch"], input[type="checkbox"]').count());
+
+	// Close WITHOUT toggling anything.
+	await closeModal(page);
+	await page.waitForTimeout(500);
+	const bodyClosed = await body(page);
+	console.log('BODY_CLOSED', bodyClosed);
+	console.log('VACUOUS_PASS', bodyOpen !== bodyClosed ? 'YES: classes differ with nothing toggled' : 'no');
+
+	// Positive control: the real function, with its classes diff.
+	await press(page, 'Open Accessibility Menu');
+	await page.waitForTimeout(1000);
+	const b1 = await body(page);
+	await enableSomeOptions(page);
+	const b2 = await body(page);
+	const s1 = new Set(b1.split(/\s+/));
+	const s2 = new Set(b2.split(/\s+/));
+	console.log('ADDED', JSON.stringify([...s2].filter((c) => !s1.has(c))));
+	console.log('REMOVED', JSON.stringify([...s1].filter((c) => !s2.has(c))));
+	console.log('LOCALSTORAGE', JSON.stringify(await page.evaluate(() => Object.keys(localStorage))));
+});

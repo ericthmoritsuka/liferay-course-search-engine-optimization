@@ -1,0 +1,71 @@
+// READ-ONLY probe: never presses Save or Update.
+import {test} from '@playwright/test';
+import * as path from 'path';
+
+import {closeModal, openMenu, press} from '../../helpers/liferay';
+import {signIn} from '../../helpers/sign-in';
+
+test('c06 dashboard end state and XLS export', async ({page}) => {
+	test.setTimeout(400000);
+	const t0 = Date.now();
+	const T = (m: string) => console.log(`T+${Math.round((Date.now() - t0) / 1000)}s ${m}`);
+	await signIn(page, 'admin');
+	await openMenu(page, 'Global Menu', 'Applications', 'Content Dashboard');
+	console.log('URL', page.url());
+
+	const heading = await page.locator('h2, h3, .sheet-title, .card-title').allInnerTexts();
+	console.log('HEADINGS', JSON.stringify(heading.map((h) => h.trim()).filter(Boolean).slice(0, 10)));
+
+	// Open the chart Configure dialog (cog) and read In Use; then close WITHOUT saving.
+	await press(page, 'Configure', 'Content Chart', 'cog');
+	for (const frame of page.frames()) {
+		const lists = frame.getByRole('listbox');
+		if ((await lists.count().catch(() => 0)) >= 2) {
+			const avail = await lists.nth(0).locator('option').allInnerTexts();
+			const inUse = await lists.nth(1).locator('option').allInnerTexts();
+			console.log('AVAILABLE', JSON.stringify(avail.map((s) => s.trim())));
+			console.log('IN_USE', JSON.stringify(inUse.map((s) => s.trim())));
+		}
+	}
+	await closeModal(page);
+	T('config closed');
+
+	// Reproduce the filter exactly as the test does (filtering does not persist data).
+	T('before ' + 'Filter');
+	await press(page, 'Filter');
+	T('after ' + 'Filter');
+	T('before ' + 'Author');
+	await press(page, 'Author');
+	T('after ' + 'Author');
+	T('before ' + 'Walter Douglas');
+	await press(page, 'Walter Douglas');
+	T('after ' + 'Walter Douglas');
+	T('before ' + 'Select');
+	await press(page, 'Select');
+	T('after ' + 'Select');
+
+	console.log('FILTER_BAR', (await page.locator('text=/Results Found With Filters/').first().innerText().catch(() => 'none')));
+	console.log('CONTENT_TITLE', JSON.stringify(await page.locator('text=/^Content \\(\\d+\\)$/').allInnerTexts()));
+
+	const exportButton = page.getByRole('button', {name: 'Export XLS'});
+	console.log('EXPORT_BUTTONS', await exportButton.count());
+
+	const responses: string[] = [];
+	page.on('response', (r) => {
+		if (/xls|spreadsheet|export/i.test(r.url())) {
+			responses.push(`${r.status()} ${r.headers()['content-type']} ${r.url().slice(0, 200)}`);
+		}
+	});
+
+	const [download] = await Promise.all([
+		page.waitForEvent('download', {timeout: 60000}),
+		exportButton.click(),
+	]);
+
+	const target = path.join(__dirname, 'out', 'export-' + download.suggestedFilename());
+	await download.saveAs(target);
+	console.log('DOWNLOAD', download.suggestedFilename(), target);
+	console.log('RESPONSES', JSON.stringify(responses));
+	await page.waitForTimeout(1500);
+	console.log('TOAST', JSON.stringify(await page.locator('.alert').allInnerTexts()));
+});

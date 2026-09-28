@@ -189,6 +189,53 @@ Author picker said "No users were found" about a user who exists. The parser
 now reads a setup lesson's required sections as test `00`, and a failure that
 names a missing user, item, or result is first a question about the index.
 
+## Exercises Resume Where The Last One Stopped
+
+Learned on Mastering Liferay Pages and Navigation, the second course. Each
+test starts in a fresh browser at the site's home, but a lesson assumes the
+reader is still where the previous exercise left them: "While in the Pages
+application, click *Add Child Page*", "Return to the *Navigation Menus*
+overview page". Unhandled, *Add Child Page* matched a plus icon on the home
+page, the click changed the screen, and the step passed. The generator now
+opens the named application first, by the path the course itself used to
+reach it earlier.
+
+**"Repeat steps 3-6 to create these pages:"** is replayed once per listed
+item, swapping the value the steps set (`Products` becomes each page, or the
+one control the last step chooses). Skipped, the pages were never created, the
+exercise still passed, and every later exercise failed looking for them. A
+table naming a different target on every row is not replayed yet, and says so.
+
+**The page editor's Components panel is searched, then added from by
+keyboard**, as liferay-portal's PageEditorPage does: "Search Fragments and
+Widgets", focus "Add <name>", Enter twice, then "Saved as Draft". A position
+relative to another fragment ("just above the Search Results container") is not
+addressed yet, and says so.
+
+**How a row is named decides whether a qualifier scopes.** "*Add Child Page*
+for the Products page" is scoped to the Products row, but the row reads
+"Products Content Page DRAFT" - never "Products page" - so the qualifier
+scoped to nothing and seven buttons matched. The lowercase noun is dropped
+("Calendar page", "Title row"); a capitalized one is part of a name and kept
+("Primary Master Page" is a template); an article left behind ("an entry"
+becoming "an") is no qualifier at all, since it would scope to every row.
+
+**A creation sentence means the creation steps.** "Create a new menu named
+`Footer About Us Menu`" is what the previous exercise spelled out as "Click
+*New*", then "For Name, enter ... and click *Save*" - so *New*, *Name*,
+*Save*. Filling Name alone found no field, because the form was never opened.
+
+**Count after the screen has drawn.** Checking that a component was added by
+the page gaining a fragment passed vacuously when the "before" count was
+taken on arrival: the editor had not drawn the page yet, so it read zero on a
+page that already held a container. Count once the panel is visible and the
+network is quiet. The same applies to any "more than before" check.
+
+**The editor's save message depends on the release.** Current releases show
+"Saved as Draft"; 2026.q1 shows "Changes have been saved. Page editor will
+autosave new changes." - and shows it on load as well, so on its own it proves
+nothing. Pair it with evidence of the change itself.
+
 ## State That Outlives A Test
 
 The database is reset between runs, not between exercises, and some state is
@@ -295,6 +342,17 @@ course pressing *Publish* behind an open dialog in four steps of other courses.
   in 225ms warm and outlasted the ten second change timeout cold, and the
   step failed with the dialog on the screen. The change check now keeps
   waiting while the page is still fetching.
+- **Tomcat ignores a shutdown sent while it is starting.** It is not
+  listening for one yet, and a run waited seven minutes for a stop that was
+  never coming. run-live.sh re-sends the shutdown, then stops the java process
+  itself.
+- **A process pattern can match your own shell.** `pkill -f` or `pgrep -f`
+  with the bundle's path also matches the shell whose command line contains
+  that path - it killed the shell running the command, twice. Anchor the
+  pattern to the program: `^[^ ]*java .*-Dcatalina.base=<bundle>`.
+- **Editing the engine while a workspace is synced makes the next run refuse.**
+  That is the drift guard working: sync the workspace after changing
+  LESSONS.md or a helper, before running.
 - **Check a report is this run's before showing it.** The runner once copied
   `playwright-report` into the run's folder, but it overrode the reporters
   with json and line, so the run never wrote one - the folder held a report a

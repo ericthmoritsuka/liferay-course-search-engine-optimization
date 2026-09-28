@@ -639,6 +639,118 @@ async function downloadAction(page: Page, label: string) {
 }
 
 /**
+ * Add a fragment, widget, or composition from the page editor's Components
+ * panel, as "drag and drop the *Container* fragment into the page's drop
+ * zone" asks.
+ *
+ * Found by the panel's search - "Search Fragments and Widgets" - because a
+ * lesson names the component, not the collection it is filed under. Placed
+ * the way liferay-portal's PageEditorPage.addFragment places one when no
+ * target is given: focus its "Add <name>" button and press Enter twice, the
+ * editor's own keyboard placement, rather than a mouse drag the editor's drop
+ * zones do not always register. Into a container, it is dragged onto the
+ * container the step names, as PageEditorPage does with a drop target.
+ * Checked by the editor saying it saved the change.
+ */
+async function addComponentAction(
+	page: Page,
+	name: string,
+	into: 'container' | 'page' = 'page'
+) {
+	const components = page.getByRole('tab', {exact: true, name: 'Components'});
+
+	if (
+		(await components.isVisible().catch(() => false)) &&
+		((await components.getAttribute('aria-selected')) !== 'true')
+	) {
+		await components.click({timeout: 5000});
+	}
+
+	//
+	// What is on the page now, to tell afterwards that something was added.
+	//
+	const fragments = page.locator('#page-editor .page-editor__topper');
+
+	const search = page.getByLabel('Search Fragments and Widgets');
+
+	await expect(
+		search,
+		'the page editor shows no Components panel to add from'
+	).toBeVisible({timeout: FIND_TIMEOUT});
+
+	//
+	// Counted once the editor has drawn the page. Counted on arrival it read
+	// zero on a page already holding a container, so "more afterwards" would
+	// have passed on the page merely finishing loading.
+	//
+	await page
+		.waitForLoadState('networkidle', {timeout: 5000})
+		.catch(() => undefined);
+
+	const before = await fragments.count().catch(() => 0);
+
+	await search.fill(name);
+
+	await page.waitForTimeout(SETTLE);
+
+	if (into === 'container') {
+		const item = page
+			.getByRole('menuitem')
+			.filter({hasText: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)})
+			.first();
+
+		const container = page
+			.locator('#page-editor .page-editor__container, #page-editor [data-name="Container"]')
+			.last();
+
+		await expect(
+			container,
+			`there is no container on the page to put ${name} into`
+		).toBeVisible({timeout: FIND_TIMEOUT});
+
+		await item.dragTo(container);
+	}
+	else {
+		const add = page.getByLabel(`Add ${name}`, {exact: true}).first();
+
+		await expect(
+			add,
+			`the Components panel offers nothing named "${name}" to add`
+		).toBeVisible({timeout: FIND_TIMEOUT});
+
+		await add.focus();
+
+		await page.keyboard.press('Enter');
+
+		await page.waitForTimeout(SETTLE / 2);
+
+		await page.keyboard.press('Enter');
+	}
+
+	//
+	// Added, then saved. The page gains a fragment, and the editor says it
+	// saved: "Saved as Draft" on current releases, "Changes have been saved"
+	// on 2026.q1 - which says it on load too, so on its own it proves nothing.
+	//
+	await expect
+		.poll(() => fragments.count().catch(() => 0), {
+			message: `${name} was not added to the page`,
+			timeout: CHANGE_TIMEOUT * 2,
+		})
+		.toBeGreaterThan(before);
+
+	await expect(
+		page
+			.getByLabel('Saved as Draft', {exact: true})
+			.or(page.getByText('Changes have been saved.', {exact: false}))
+			.first(),
+		`${name} was added, but the page editor did not save the change`
+	).toBeVisible({timeout: CHANGE_TIMEOUT * 2});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
  * Wait for a reindex of all search indexes to finish.
  *
  * Execute starts it and returns at once; the index is built in the
@@ -2424,6 +2536,7 @@ function observed<A extends unknown[], R>(
 	};
 }
 
+export const addComponent = observed('add', addComponentAction);
 export const attach = observed('attach', attachAction);
 export const closeModal = observed('close', closeModalAction);
 export const download = observed('download', downloadAction);
