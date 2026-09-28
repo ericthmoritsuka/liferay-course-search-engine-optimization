@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import {expect, Frame, Locator, Page} from '@playwright/test';
+import {expect, Frame, Locator, Page, test} from '@playwright/test';
 
 /**
  * How Liferay's two menus open. Taken from liferay-portal's own page objects
@@ -2273,7 +2273,51 @@ async function closeOpenMenus(page: Page): Promise<boolean> {
  * where a modal is open in a frame, that modal is returned ahead of the frame
  * that holds it. A reader cannot touch what is behind a dialog either.
  */
+//
+// Native dialogs - alert, confirm, prompt, beforeunload - answered as a reader
+// answers them, and never silently.
+//
+// Playwright dismisses them by default. A reader facing "Are you sure?" after
+// clicking Delete clicks OK, because a lesson only ever goes forward; the
+// default cancelled the action instead, and the screen changed enough for the
+// step to pass. The lesson's wording cannot say which prompts are native:
+// "confirm" in a lesson means "check that" far more often than it means a
+// dialog. So every dialog is accepted, and each is recorded in the report as
+// an annotation with its message, where a reviewer sees it.
+//
+const dialogsWatched = new WeakSet<Page>();
+
+function watchDialogs(page: Page) {
+	if (dialogsWatched.has(page)) {
+		return;
+	}
+
+	dialogsWatched.add(page);
+
+	page.on('dialog', async (dialog) => {
+		const note = `${dialog.type()}: "${dialog.message().slice(0, 200)}"`;
+
+		try {
+			test.info().annotations.push({
+				description: `accepted as a reader would - ${note}`,
+				type: 'native dialog',
+			});
+		}
+		catch (error) {
+
+			// Outside a running test there is no report to write to.
+
+		}
+
+		console.log(`[native dialog] accepted ${note}`);
+
+		await dialog.accept().catch(() => undefined);
+	});
+}
+
 async function scopesFor(page: Page): Promise<Array<Locator | Frame>> {
+	watchDialogs(page);
+
 	const scopes: Array<Locator | Frame> = [];
 
 	for (const frame of [...page.frames()].reverse()) {

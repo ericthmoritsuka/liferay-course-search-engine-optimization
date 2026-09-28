@@ -109,16 +109,14 @@ the gaps.
 
 ## Gaps, Most Worth Fixing First
 
-1. **No dialog handler.** Liferay asks some confirmations with a native
-   `confirm()`. Playwright dismisses it, so a step like "click *Delete* and
-   confirm" is silently cancelled and can still change the screen enough to
-   pass. Add a handler that accepts when the lesson's step confirms, and
-   fails loudly on any dialog it did not expect.
-2. **Steps are comments, not `test.step`.** The generator writes
-   `// Step 3. ...` and report.py maps a failing line back to a step. Wrapping
-   each lesson step in `test.step('Step 3. ...', ...)` puts the lesson's own
-   steps in the HTML report and the trace, attributes failures natively, and
-   is what a course author would read.
+1. ~~No dialog handler.~~ Done 2026-09-28: every native dialog is accepted,
+   as a reader would, and recorded in the report as a `native dialog`
+   annotation with its message. Accepting rather than failing, because a
+   lesson's "confirm" usually means "check that", so the wording cannot say
+   which prompts are native.
+2. ~~Steps are comments, not `test.step`.~~ Done 2026-09-28: each lesson step
+   is a `test.step` named after it, and a step not performed is a
+   `test.step.skip` titled with the reason.
 3. **Single reads where a retrying assertion exists.** `verifyHead` reads the
    head once and compares with `toBe`; the screen-change check compares two
    fingerprints with `not.toBe`. The head check can become
