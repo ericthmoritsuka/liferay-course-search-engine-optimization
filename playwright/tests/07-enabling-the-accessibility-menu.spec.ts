@@ -11,7 +11,7 @@
 import {test} from '@playwright/test';
 
 import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
-import {CAPTURE, capture} from '../helpers/screenshot';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
 //
@@ -29,6 +29,7 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 
 	// Step 2. Click *Accessibility*, check *Enable Accessibility Menu*, and click *Update*.
 	await test.step('Step 2. Click *Accessibility*, check *Enable Accessibility Menu*, and click *Update*.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/08.png']);
 		await press(page, 'Accessibility');
 		await press(page, 'Enable Accessibility Menu');
 		await press(page, 'Update');
@@ -38,7 +39,7 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 
 	// Step 3. Go to the *Home* page.
 	await test.step('Step 3. Go to the *Home* page.', async () => {
-		await press(page, 'Home');
+		await goHome(page);
 	});
 
 	// Step 4. Refresh the browser window and hit the Tab key twice.
@@ -49,6 +50,7 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 
 	// Step 5. Once the "Open Accessibility Menu" button appears, hit Enter or click it.
 	await test.step('Step 5. Once the "Open Accessibility Menu" button appears, hit Enter or click it.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/09.png']);
 		await press(page, 'Open Accessibility Menu');
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/09.png'});
@@ -56,6 +58,7 @@ test('Enabling the Accessibility Menu', async ({page}) => {
 
 	// Step 6. Enable some of the options, close the menu, and verify the changes on the page.
 	await test.step('Step 6. Enable some of the options, close the menu, and verify the changes on the page.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/10.png']);
 		await enableSomeOptions(page);
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/10.png'});

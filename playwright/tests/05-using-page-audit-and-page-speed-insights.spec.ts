@@ -11,7 +11,7 @@
 import {test} from '@playwright/test';
 
 import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
-import {CAPTURE, capture} from '../helpers/screenshot';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
 //
@@ -28,11 +28,12 @@ test('Using Page Audit and Page Speed Insights', async ({page}) => {
 
 	// Step 2. Go to the *Home* page.
 	await test.step('Step 2. Go to the *Home* page.', async () => {
-		await press(page, 'Home');
+		await goHome(page);
 	});
 
 	// Step 3. Click Page Audit (![Page Audit](../../images/icon-page-audit-tool.png)) in the Application Bar.
 	await test.step('Step 3. Click Page Audit (![Page Audit](../../images/icon-page-audit-tool.png)) in the Application Bar.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/01.png']);
 		await press(page, 'Page Audit');
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/01.png'});
@@ -44,6 +45,7 @@ test('Using Page Audit and Page Speed Insights', async ({page}) => {
 
 	// Step 5. Go to the *PageSpeed Insights* tab.
 	await test.step('Step 5. Go to the *PageSpeed Insights* tab.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/02.png']);
 		await press(page, 'PageSpeed Insights');
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/02.png'});

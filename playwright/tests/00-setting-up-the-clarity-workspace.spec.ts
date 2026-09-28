@@ -11,7 +11,7 @@
 import {test} from '@playwright/test';
 
 import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
-import {CAPTURE, capture} from '../helpers/screenshot';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
 //
@@ -63,6 +63,7 @@ test('Setting Up the Clarity Workspace', async ({page}) => {
 
 	// Step 9. Go to the *Index Actions* tab and click *Reindex* for All Search Indexes.
 	await test.step('Step 9. Go to the *Index Actions* tab and click *Reindex* for All Search Indexes.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/02-course-environment-setup/00-course-environment-setup/images/04.png']);
 		await press(page, 'Index Actions');
 		await press(page, 'Reindex', 'All Search Indexes');
 

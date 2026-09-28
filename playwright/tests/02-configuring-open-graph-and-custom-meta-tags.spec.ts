@@ -11,7 +11,7 @@
 import {test} from '@playwright/test';
 
 import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
-import {CAPTURE, capture} from '../helpers/screenshot';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
 //
@@ -35,6 +35,7 @@ test('Configuring Open Graph and Custom Meta Tags', async ({page}) => {
 
 	// Step 2. Enter these values:
 	await test.step('Step 2. Enter these values:', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/04.png']);
 		await attach(page, 'Image', 'liferay-course-search-engine-optimization/exercises/quality-sunglasses-01.jpeg');
 		await toggle(page, 'Use Custom Title', true);
 		await toggle(page, 'Use Custom Description', true);

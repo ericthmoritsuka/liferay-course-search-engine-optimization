@@ -11,7 +11,7 @@
 import {test} from '@playwright/test';
 
 import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
-import {CAPTURE, capture} from '../helpers/screenshot';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
 //
@@ -24,6 +24,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 
 	// Step 1. Open the *Global Menu* (![](../../images/icon-applications-menu.png)), go to the *Applications* tab, and click
 	await test.step('Step 1. Open the *Global Menu* (![](../../images/icon-applications-menu.png)), go to the *Applications* tab, and click', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/03.png']);
 		await openMenu(page, 'Global Menu', 'Applications', 'Content Dashboard');
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/03.png'});
@@ -41,6 +42,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 
 	// Step 4. Use the *right arrow* (![](../../images/icon-caret-right.png)) to add the *Job Positions* and *Region* vocabul
 	await test.step('Step 4. Use the *right arrow* (![](../../images/icon-caret-right.png)) to add the *Job Positions* and *Region* vocabul', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/04.png']);
 		await transfer(page, 'right', ['Job Positions', 'Region']);
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/04.png'});
@@ -48,6 +50,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 
 	// Step 5. Click *Save* and close the modal window.
 	await test.step('Step 5. Click *Save* and close the modal window.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/05.png']);
 		await press(page, 'Save');
 		await closeModal(page);
 
@@ -60,6 +63,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 
 	// Step 7. Click *Filter*, check *Author*, select *Walter Douglas*, and click *Select*.
 	await test.step('Step 7. Click *Filter*, check *Author*, select *Walter Douglas*, and click *Select*.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/06.png']);
 		await press(page, 'Filter');
 		await press(page, 'Author');
 		await press(page, 'Walter Douglas');
@@ -70,6 +74,7 @@ test('Using the Content Dashboard to Analyze Content', async ({page}) => {
 
 	// Step 8. Click *Export XLS* to download a spreadsheet report of Walter Douglas's content.
 	await test.step('Step 8. Click *Export XLS* to download a spreadsheet report of Walter Douglas\'s content.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/07.png']);
 		await download(page, 'Export XLS');
 
 		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/07.png'});

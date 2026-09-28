@@ -219,6 +219,28 @@ report it.
 is stored for the user. On a database a course has already run against, the
 panel opens by itself and "Page Audit" names two controls.
 
+## Replicating The Course's Own Screenshots
+
+A published image is one moment, one frame, and one zoom. The first
+replication run (setup plus module 06) matched four of eleven closely - the
+Content Dashboard chart, the Accessibility Menu images - and the misses taught
+three things:
+
+- **The window size is part of the picture.** Most weak matches were taken in
+  a narrower browser window than the tests' 1280 pixels, so Liferay laid the
+  page out differently and no crop can reproduce it. The author's zoom can be
+  read off the text size and the window width off the image; capture at that
+  width.
+- **Some moments are not on the steps' path.** The author reopened the Filter
+  menu after filtering to show Author ticked; the spreadsheet image is a
+  desktop app. Those need a recipe of their own.
+- **Compare refined frames, and let the screen settle.** A candidate taken
+  the instant an action returns can miss what it opened, and a rough frame
+  can undersell the right moment.
+
+The highlight frames are #FFCF40, six pixels wide, on every published image
+seen; replicate.py redraws them where the original has them.
+
 ## Verification Is The Half Worth Automating
 
 A lesson routes verification through developer tools, which no page script can

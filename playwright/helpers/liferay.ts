@@ -10,6 +10,8 @@ import * as path from 'path';
 
 import {expect, Frame, Locator, Page, test} from '@playwright/test';
 
+import {candidate} from './screenshot';
+
 /**
  * How Liferay's two menus open. Taken from liferay-portal's own page objects
  * rather than guessed, and two handles apiece because the attribute differs
@@ -124,7 +126,7 @@ const SETTLE = 900;
  * Reads the value back afterwards. A field that fills itself in from another
  * accepts the typing and ends up holding both values, and nothing throws.
  */
-export async function fill(
+async function fillAction(
 	page: Page,
 	field: string,
 	value: string,
@@ -316,7 +318,7 @@ async function chooseLanguage(page: Page, language: string, input: Locator) {
  * field they govern disabled: the step after asks for Custom Title and finds
  * it present, correctly named, and not editable.
  */
-export async function toggle(page: Page, field: string, on: boolean) {
+async function toggleAction(page: Page, field: string, on: boolean) {
 	//
 	// Exactly first, then as a substring.
 	//
@@ -375,7 +377,7 @@ export async function toggle(page: Page, field: string, on: boolean) {
  * when a column is full, and clicking a disabled arrow changes nothing and
  * throws nothing.
  */
-export async function transfer(
+async function transferAction(
 	page: Page,
 	direction: 'left' | 'right',
 	items: string[]
@@ -385,6 +387,14 @@ export async function transfer(
 			? 'Transfer Item Right to Left'
 			: 'Transfer Item Left to Right';
 
+	//
+	// Retried until the lists arrive. The dialog they are in is an iframe that
+	// loads after the click opening it returns, and one look found no lists
+	// while the dialog was still loading.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (Date.now() < deadline) {
 	for (const scope of await scopesFor(page)) {
 		const lists = scope.getByRole('listbox');
 
@@ -437,6 +447,9 @@ export async function transfer(
 		return;
 	}
 
+		await page.waitForTimeout(250);
+	}
+
 	throw new Error(
 		`no pair of lists to move "${items.join('", "')}" between is on ` +
 			`this screen`
@@ -446,7 +459,7 @@ export async function transfer(
 /**
  * Reload the page, as "Refresh the browser window" asks.
  */
-export async function reload(page: Page) {
+async function reloadAction(page: Page) {
 	await page.reload({waitUntil: 'load'});
 
 	await page.waitForTimeout(SETTLE);
@@ -460,7 +473,7 @@ export async function reload(page: Page) {
  * lesson reaches it with keys, and a Tab that moved focus nowhere means the
  * page never offered it.
  */
-export async function pressKeys(page: Page, key: string, times = 1) {
+async function pressKeysAction(page: Page, key: string, times = 1) {
 	const focused = () =>
 		page.evaluate(() => {
 			const active = document.activeElement;
@@ -556,6 +569,8 @@ export async function enableSomeOptions(page: Page) {
 		});
 	}
 
+	await candidate(page, 'options turned on');
+
 	await closeModal(page);
 
 	const added = (await bodyClasses())
@@ -580,7 +595,7 @@ export async function enableSomeOptions(page: Page) {
  * writes an Apache POI HSSFWorkbook, and every such .xls opens with the OLE2
  * header D0 CF 11 E0.
  */
-export async function download(page: Page, label: string) {
+async function downloadAction(page: Page, label: string) {
 	const [file] = await Promise.all([
 		page.waitForEvent('download', {timeout: CHANGE_TIMEOUT * 3}),
 		press(page, label),
@@ -672,7 +687,7 @@ export async function waitForReindex(page: Page) {
  * Closing is checked by the dialog going away. A dialog that closed itself is
  * already what the lesson asks for, so there being none open is not a failure.
  */
-export async function closeModal(page: Page) {
+async function closeModalAction(page: Page) {
 	for (const frame of [...page.frames()].reverse()) {
 		const dialog = frame
 			.locator('.modal.show, .modal.d-block, [role="dialog"]')
@@ -712,7 +727,7 @@ export async function closeModal(page: Page) {
  * The path is the one the lesson prints, resolved against the workspace root,
  * because that is where the course keeps its exercise material.
  */
-export async function attach(page: Page, label: string, file: string) {
+async function attachAction(page: Page, label: string, file: string) {
 	const relative = file.replace(/^.*?exercises\//, 'exercises/');
 
 	const candidates = [
@@ -1120,7 +1135,7 @@ export async function drag(page: Page, source: string, target: string) {
  * browser is in, and a course moves between sites and between users, so a
  * menu read once is wrong for some steps however carefully it was read.
  */
-export async function openMenu(
+async function openMenuAction(
 	page: Page,
 	menuName: string,
 	section: string | null,
@@ -1535,7 +1550,7 @@ function watchPosts(page: Page) {
 	});
 }
 
-export async function press(
+async function pressAction(
 	page: Page,
 	label: string,
 	within?: string,
@@ -2387,3 +2402,35 @@ async function screenPrint(page: Page): Promise<string> {
 	//
 	throw new Error('the screen could not be read to compare before and after');
 }
+
+/**
+ * Record a replication candidate before and after an action. See candidate()
+ * in screenshot.ts: it does nothing unless REPLICATE_DIR is set.
+ */
+function observed<A extends unknown[], R>(
+	verb: string,
+	action: (page: Page, ...args: A) => Promise<R>
+) {
+	return async (page: Page, ...args: A): Promise<R> => {
+		const what = `${verb} ${typeof args[0] === 'string' ? args[0] : ''}`;
+
+		await candidate(page, `before ${what}`);
+
+		const result = await action(page, ...args);
+
+		await candidate(page, `after ${what}`);
+
+		return result;
+	};
+}
+
+export const attach = observed('attach', attachAction);
+export const closeModal = observed('close', closeModalAction);
+export const download = observed('download', downloadAction);
+export const fill = observed('fill', fillAction);
+export const openMenu = observed('open', openMenuAction);
+export const press = observed('press', pressAction);
+export const pressKeys = observed('keys', pressKeysAction);
+export const reload = observed('reload', reloadAction);
+export const toggle = observed('toggle', toggleAction);
+export const transfer = observed('transfer', transferAction);

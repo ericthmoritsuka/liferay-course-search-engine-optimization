@@ -35,6 +35,79 @@ export const CAPTURE = {
 	viewport: {height: 800, width: 1280},
 };
 
+//
+// Candidates for replicating a lesson's own screenshot, taken only when
+// REPLICATE_DIR is set.
+//
+// A lesson image shows one moment - often the open menu before the click the
+// step ends with, not the screen after it - and one frame, cropped and zoomed
+// by whoever took it. Rather than guess the moment, every action in a step
+// that has an image records the full screen before and after itself, and
+// replicate.py afterwards picks the candidate the lesson image matches, finds
+// its frame inside it, and crops the replica. With REPLICATE_DIR unset, none
+// of this runs.
+//
+const REPLICATE_DIR = process.env.REPLICATE_DIR;
+
+const armed = new WeakMap<Page, {folder: string; names: string[]; seq: number}>();
+
+/** Start recording candidates for the images this step's lesson shows. */
+export async function armCapture(page: Page, names: string[]) {
+	if (!REPLICATE_DIR || !names.length) {
+		return;
+	}
+
+	const folder = path.join(REPLICATE_DIR, names[0].replace(/\.png$/, ''));
+
+	fs.mkdirSync(folder, {recursive: true});
+
+	fs.writeFileSync(
+		path.join(folder, 'images.json'),
+		JSON.stringify({names}, null, 1)
+	);
+
+	armed.set(page, {folder, names, seq: 0});
+
+	await candidate(page, 'start of step');
+}
+
+/** One candidate: the whole screen, as it is now. */
+export async function candidate(page: Page, tag: string) {
+	const state = armed.get(page);
+
+	if (!REPLICATE_DIR || !state) {
+		return;
+	}
+
+	state.seq += 1;
+
+	//
+	// Settled first. An action returns before what it opened has finished
+	// drawing, and a candidate taken at once showed the Index Actions list
+	// without its Reindex buttons - the right screen, not yet the lesson's.
+	//
+	await page
+		.waitForLoadState('networkidle', {timeout: 3000})
+		.catch(() => undefined);
+
+	await page.waitForTimeout(400);
+
+	const slug = tag
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-|-$/g, '')
+		.slice(0, 50);
+
+	await page
+		.screenshot({
+			path: path.join(
+				state.folder,
+				`${String(state.seq).padStart(2, '0')}-${slug}.png`
+			),
+		})
+		.catch(() => undefined);
+}
+
 export type Shot = {
 	/** Capture this element alone rather than the whole screen. */
 	frame?: Locator;
@@ -128,6 +201,10 @@ export async function capture(page: Page, shot: Shot) {
 		mask: shot.mask,
 		path: target,
 	});
+
+	await candidate(page, `end of step ${path.basename(shot.name)}`);
+
+	armed.delete(page);
 
 	//
 	// The box in CSS pixels beside the image, for the finishing script. Its

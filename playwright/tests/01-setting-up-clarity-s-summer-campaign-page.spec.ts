@@ -11,7 +11,7 @@
 import {test} from '@playwright/test';
 
 import {attach, closeModal, download, enableSomeOptions, fill, goHome, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
-import {CAPTURE, capture} from '../helpers/screenshot';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
 import {signIn} from '../helpers/sign-in';
 
 //
@@ -33,6 +33,7 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 
 	// Step 3. Click *New*, select *Primary Master Page*, enter `Quality Sunglasses` for name, and click *Add*.
 	await test.step('Step 3. Click *New*, select *Primary Master Page*, enter `Quality Sunglasses` for name, and click *Add*.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/01.png']);
 		await press(page, 'New');
 		await press(page, 'Primary Master Page');
 		await fill(page, 'name', 'Quality Sunglasses');
@@ -43,6 +44,7 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 
 	// Step 4. Click *Actions* (![](../../images/icon-actions.png)) in the Application Bar and select *Configure*.
 	await test.step('Step 4. Click *Actions* (![](../../images/icon-actions.png)) in the Application Bar and select *Configure*.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/02.png']);
 		await press(page, 'Actions', undefined, 'actions');
 		await press(page, 'Configure');
 
@@ -64,6 +66,7 @@ test('Setting Up Clarity\'s Summer Campaign Page', async ({page}) => {
 
 	// Step 7. Go to the *SEO* tab and set these values:
 	await test.step('Step 7. Go to the *SEO* tab and set these values:', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/03.png']);
 		await press(page, 'SEO');
 		await fill(page, 'HTML Title', 'Quality sunglasses for men and women, aviator, wayfarer and cat-eye', {language: 'English', section: 'Settings'});
 		await fill(page, 'HTML Title', 'Gafas de sol de calidad para hombre y mujer, aviador, wayfarer y cat-eye', {language: 'Spanish', section: 'Settings'});
