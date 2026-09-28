@@ -56,6 +56,16 @@ Accessibility Menu's own steps never run. Audit a suite this way before
 presenting it as correct. Give each auditor its own Playwright config and
 output folder, or one probe empties another's evidence.
 
+**The re-audit found the fixes' own checks vacuous, four times.** Each was
+written to stop a false pass and could not fail itself: the options check
+compared the body's whole class list, which an open dialog changes by adding
+`modal-open`; the reindex wait allowed its progress bar never to appear; the
+canonical check had no value to compare; the tab check accepted "no panel
+found". Each now has a positive control - a probe that shows it failing on the
+defect it exists for (an unconfigured page, classes blocked by an injected
+no-op) and passing on the real thing. Write that control before calling a
+check done.
+
 **Presence proves nothing about the head.** Liferay renders a title, a
 canonical link, and og: tags on every page, configured or not. `verifyHead`
 checks the values the course set: the title contains the HTML Title, and every
@@ -194,6 +204,16 @@ Seen once and not reproduced: on a fresh database the *Add Page* dialog
 rendered Clarity's 404 page inside its frame, so there was no Name field. The
 next run from the same reset passed. If it recurs, the failure capture shows
 the broken glasses.
+
+**The course database can already hold what an exercise sets.** The SEO
+workspace's shipped database has the Accessibility Menu enabled for the
+company and for Clarity, so "check *Enable Accessibility Menu*" finds it
+checked and the step proves nothing. That is a course issue, not a test one;
+report it.
+
+**Page Audit's open state survives a new sign-in**, not only a page load: it
+is stored for the user. On a database a course has already run against, the
+panel opens by itself and "Page Audit" names two controls.
 
 ## Verification Is The Half Worth Automating
 

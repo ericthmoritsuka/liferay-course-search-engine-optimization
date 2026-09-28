@@ -46,7 +46,7 @@ test('Verifying Your SEO Configuration', async ({page}) => {
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/08.png'});
 
 	// Step 6. Verify the canonical `<link>` tags appear.
-	await verifyHead(page, 'canonical');
+	await verifyHead(page, 'canonical', {'link[rel="alternate"][hreflang="es-ES"]': '/es/gafas-sol-calidad', 'link[rel="canonical"]': '/quality-sunglasses'});
 
 	await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/04-implementing-claritys-seo-strategy/00-implementing-claritys-seo-strategy/images/09.png'});
 

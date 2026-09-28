@@ -71,7 +71,10 @@ export default defineConfig({
 
 	testDir: './tests',
 
-	timeout: 180000,
+	//
+	// Tripled under SLOW_MO, whose pauses add up across a long exercise.
+	//
+	timeout: process.env.SLOW_MO ? 540000 : 180000,
 
 	use: {
 		//
@@ -82,6 +85,13 @@ export default defineConfig({
 		actionTimeout: 15000,
 
 		baseURL: process.env.LIFERAY_URL || 'http://localhost:8080',
+
+		//
+		// SLOW_MO=<milliseconds> pauses before every action, so a headed run
+		// can be followed by eye. It changes nothing about what is checked.
+		//
+		launchOptions: {slowMo: Number(process.env.SLOW_MO || 0)},
+
 		screenshot: 'only-on-failure',
 		trace: 'retain-on-failure',
 		video: 'retain-on-failure',

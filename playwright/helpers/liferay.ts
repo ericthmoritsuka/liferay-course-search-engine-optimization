@@ -495,7 +495,18 @@ export async function pressKeys(page: Page, key: string, times = 1) {
  * before and after are the change a reader would see.
  */
 export async function enableSomeOptions(page: Page) {
-	const bodyClasses = () => page.evaluate(() => document.body.className);
+	//
+	// Only the menu's own classes. Comparing the whole class list could not
+	// fail: an open dialog adds modal-open to the body and closing it takes it
+	// away, so the list differed with nothing turned on at all.
+	//
+	const bodyClasses = () =>
+		page.evaluate(() =>
+			[...document.body.classList]
+				.filter((one) => one.startsWith('c-prefers'))
+				.sort()
+				.join(' ')
+		);
 
 	const before = await bodyClasses();
 
@@ -547,10 +558,15 @@ export async function enableSomeOptions(page: Page) {
 
 	await closeModal(page);
 
+	const added = (await bodyClasses())
+		.split(' ')
+		.filter((one) => one && !before.split(' ').includes(one));
+
 	expect(
-		await bodyClasses(),
-		'turning options on changed nothing on the page'
-	).not.toBe(before);
+		added.length,
+		`turning two options on added ${added.length} of the page classes ` +
+			`they apply (${added.join(', ') || 'none'})`
+	).toBeGreaterThanOrEqual(2);
 }
 
 /**
@@ -619,8 +635,6 @@ export async function download(page: Page, label: string) {
  *
  * The row shows a progress bar while it runs and its Reindex button again
  * when it is done, which is how liferay-portal's SearchAdminPage.ts reads it.
- * The bar is allowed not to appear: on a small database the reindex can
- * finish before the first look.
  */
 export async function waitForReindex(page: Page) {
 	const row = page
@@ -628,10 +642,15 @@ export async function waitForReindex(page: Page) {
 		.filter({hasText: 'All Search Indexes'})
 		.first();
 
-	await row
-		.locator('.progress')
-		.waitFor({state: 'visible', timeout: 15000})
-		.catch(() => undefined);
+	//
+	// The bar must appear. Allowing it not to made this pass with no reindex
+	// at all, since the Reindex button it waits for is always there - and
+	// liferay-portal's SearchAdminPage.ts expects the bar after Execute too.
+	//
+	await expect(
+		row.locator('.progress'),
+		'Execute started no reindex: All Search Indexes shows no progress'
+	).toBeVisible({timeout: 15000});
 
 	await row
 		.locator('.progress')
@@ -942,7 +961,12 @@ export async function verifyHead(
 				return null;
 			}
 
-			return node.getAttribute('content') ?? node.textContent ?? '';
+			return (
+				node.getAttribute('content') ??
+				node.getAttribute('href') ??
+				node.textContent ??
+				''
+			);
 		}, selector);
 
 		expect(
@@ -950,7 +974,18 @@ export async function verifyHead(
 			`the page renders no ${selector}, which the course set to "${value}"`
 		).not.toBeNull();
 
-		if (selector === 'title') {
+		//
+		// A link's address depends on the host the page is served under, so
+		// only its path is the course's: the canonical of the page it visited,
+		// the alternate of the Spanish friendly URL it set.
+		//
+		if (selector.startsWith('link')) {
+			expect(
+				actual!.trim(),
+				`${selector} does not point at the page the course set up`
+			).toMatch(new RegExp(`${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+		}
+		else if (selector === 'title') {
 			expect(
 				actual!.trim(),
 				`the page title does not carry the HTML Title the course set`
@@ -1929,6 +1964,10 @@ export async function press(
 							.evaluate((node) => {
 								const id = node.getAttribute('aria-controls');
 
+								if (id && !node.ownerDocument.getElementById(id)) {
+									return 0;
+								}
+
 								const panel = ((id &&
 									node.ownerDocument.getElementById(id)) ||
 									[
@@ -1959,7 +1998,13 @@ export async function press(
 						timeout: CHANGE_TIMEOUT,
 					}
 				)
-				.not.toBe(0);
+				//
+				// No panel at all (-1) is accepted only where the screen
+				// changed: a tab that navigates has no panel to show, but a
+				// tab whose pane cannot be found and that changed nothing has
+				// not been shown to have opened.
+				//
+				.toBeGreaterThan(after === before ? 0 : -2);
 		}
 
 		return;
