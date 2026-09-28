@@ -260,6 +260,13 @@ course pressing *Publish* behind an open dialog in four steps of other courses.
   in 225ms warm and outlasted the ten second change timeout cold, and the
   step failed with the dialog on the screen. The change check now keeps
   waiting while the page is still fetching.
+- **Check a report is this run's before showing it.** The runner once copied
+  `playwright-report` into the run's folder, but it overrode the reporters
+  with json and line, so the run never wrote one - the folder held a report a
+  `--list` had left, every test "skipped" in 0ms, and it was presented as the
+  run's. The runner now writes the HTML report straight into the run's
+  folder. Before calling any report evidence, compare its timestamp and totals
+  with the run's.
 - **Keep the evidence before running anything else.** Playwright empties
   `test-results` at the start of every run, so a probe written to explain a
   failure deleted that failure's trace. `run-live.sh` copies it into the
