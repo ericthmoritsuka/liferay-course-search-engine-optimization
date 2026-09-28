@@ -98,14 +98,103 @@ export async function candidate(page: Page, tag: string) {
 		.replace(/^-|-$/g, '')
 		.slice(0, 50);
 
-	await page
-		.screenshot({
-			path: path.join(
-				state.folder,
-				`${String(state.seq).padStart(2, '0')}-${slug}.png`
-			),
+	const file = path.join(
+		state.folder,
+		`${String(state.seq).padStart(2, '0')}-${slug}.png`
+	);
+
+	await page.screenshot({path: file}).catch(() => undefined);
+
+	//
+	// The boxes of what is on the screen, beside the picture: dialogs, side
+	// panels, menus, cards, tables, forms. A published image is usually one of
+	// these with a margin of what is around it, and an element keeps its own
+	// layout at any window width - where a page laid out for a narrower
+	// window cannot be cropped to look like one. replicate.py matches the
+	// published image against these and crops along the element's edges.
+	//
+	const elements = await page
+		.evaluate(() => {
+			const selectors = [
+				'[role="dialog"]', '.modal-content', '[role="menu"]',
+				'.dropdown-menu.show', '[role="tabpanel"]', '[role="listbox"]',
+				'.sheet', '.card', '.panel', '.sidebar', '.sidenav-menu',
+				'.lfr-product-menu-panel', '.control-menu', '.portlet', 'table',
+				'form', 'header', 'nav', 'main', '#main-content', 'section',
+			];
+
+			const seen = new Set<Element>();
+			const found: Array<{box: number[]; selector: string; text: string}> = [];
+
+			for (const selector of selectors) {
+				for (const node of document.querySelectorAll(selector)) {
+					if (seen.has(node)) {
+						continue;
+					}
+
+					seen.add(node);
+
+					const box = node.getBoundingClientRect();
+
+					if ((box.width * box.height < 4000) || (box.bottom <= 0) ||
+						(box.top >= innerHeight) || (box.right <= 0) ||
+						(box.left >= innerWidth)) {
+
+						continue;
+					}
+
+					const style = getComputedStyle(node);
+
+					if ((style.visibility === 'hidden') || (Number(style.opacity) === 0)) {
+						continue;
+					}
+
+					found.push({
+						box: [box.x, box.y, box.width, box.height].map(Math.round),
+						selector,
+						text: ((node as HTMLElement).innerText || '').trim().slice(0, 60),
+					});
+				}
+			}
+
+			//
+			// And the small things a highlight frame surrounds - a list row, a
+			// table row, a button, a field - so a frame is redrawn on the
+			// element under it. Mapped point for point, the frame around the
+			// All Search Indexes row stopped short of its Reindex button,
+			// which a wider window had moved further right.
+			//
+			const targets: Array<{box: number[]; tag: string}> = [];
+
+			for (const node of document.querySelectorAll(
+				'.list-group-item, li, tr, button, a, .form-group, label, input, select, textarea, [role="menuitem"], [role="tab"], [role="option"]'
+			)) {
+				const box = node.getBoundingClientRect();
+
+				if ((box.width < 12) || (box.height < 10) || (box.bottom <= 0) ||
+					(box.top >= innerHeight) || (box.right <= 0) || (box.left >= innerWidth)) {
+
+					continue;
+				}
+
+				targets.push({
+					box: [box.x, box.y, box.width, box.height].map(Math.round),
+					tag: node.tagName.toLowerCase(),
+				});
+			}
+
+			return {
+				elements: found,
+				scale: devicePixelRatio,
+				targets,
+				viewport: [innerWidth, innerHeight],
+			};
 		})
-		.catch(() => undefined);
+		.catch(() => null);
+
+	if (elements) {
+		fs.writeFileSync(`${file}.json`, JSON.stringify(elements, null, 1));
+	}
 }
 
 export type Shot = {

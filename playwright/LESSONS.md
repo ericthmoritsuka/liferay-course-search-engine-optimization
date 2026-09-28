@@ -241,6 +241,19 @@ three things:
 The highlight frames are #FFCF40, six pixels wide, on every published image
 seen; replicate.py redraws them where the original has them.
 
+**Parked on 2026-09-28, mid-way through a second approach.** Eric reviewed the
+first replicas and rejected them: resized and stretched crops, frames tighter
+than the original, and moments before the step's effect. The rules from that
+review: crop the full screen at native resolution and never resize; frame the
+same content, with the original's context around it; choose the moment by
+content (the panel open, the options on). The engine now records the boxes of
+the screen's elements and of the small targets a highlight surrounds beside
+every candidate, and replicate.py matches the original against those elements
+and snaps highlight frames to the target under them. That version has not
+been run: its replication run was stopped when the work was parked. Resume by
+running a replication run (REPLICATE_DIR set), then replicate.py, then
+comparing each replica with Eric's notes on the first review.
+
 ## Verification Is The Half Worth Automating
 
 A lesson routes verification through developer tools, which no page script can
