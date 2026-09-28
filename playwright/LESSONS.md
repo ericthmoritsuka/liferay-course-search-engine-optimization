@@ -9,6 +9,10 @@ the real one.
 Read this before changing `helpers/liferay.ts`, and add to it when a run
 teaches you something a future run would otherwise rediscover.
 
+Its companion, [PLAYWRIGHT-PRACTICES.md](PLAYWRIGHT-PRACTICES.md), records what
+Playwright's own documentation recommends, where this engine deliberately
+deviates, and the gaps still worth closing.
+
 ## The Failure That Matters Most: Passing While Doing Nothing
 
 A green test is not evidence. Three separate mechanisms each produced one.

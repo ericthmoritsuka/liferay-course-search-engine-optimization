@@ -93,7 +93,8 @@ course workspace. The copies here are synced from one shared engine, and a
 sync refuses to overwrite a copy edited in place, so make a change in the
 shared engine rather than here.
 
-Read [LESSONS.md](LESSONS.md). It records what this engine learned from runs
+Read [LESSONS.md](LESSONS.md) and [PLAYWRIGHT-PRACTICES.md](PLAYWRIGHT-PRACTICES.md).
+LESSONS.md records what this engine learned from runs
 against real instances: which Liferay controls carry no name, where a modal
 hides a form, what differs between DXP releases, and which phrases in a lesson
 are not controls at all. Every rule in it was paid for by a test that passed
