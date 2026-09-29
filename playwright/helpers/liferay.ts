@@ -326,12 +326,31 @@ async function toggleAction(page: Page, field: string, on: boolean) {
 	// lesson calls "Use Custom Title" announces itself as "Use Custom Title
 	// Use a custom title for this page..." and no exact match reaches it.
 	//
+	//
+	// Looked for until it appears, as press() does. A single look straight
+	// after the step that opens the form - New, Filter, a settings tab -
+	// found nothing while the dialog or menu was still loading, and the
+	// setting read as not on the screen.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (true) {
 	for (const exact of [true, false]) {
 	for (const scope of await scopesFor(page)) {
+		//
+		// Only something that can be checked. A label search on its own also
+		// found the menu editor's link named About Us, behind the page picker,
+		// and check() failed on it as "not a checkbox".
+		//
 		const control = scope
 			.getByRole('checkbox', {exact, name: field})
 			.or(scope.getByRole('switch', {exact, name: field}))
-			.or(scope.getByLabel(field, {exact}))
+			.or(scope.getByRole('menuitemcheckbox', {exact, name: field}))
+			.or(
+				scope
+					.getByLabel(field, {exact})
+					.and(scope.locator('input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]'))
+			)
 			.first();
 
 		if (!(await control.count().catch(() => 0))) {
@@ -349,6 +368,87 @@ async function toggleAction(page: Page, field: string, on: boolean) {
 
 		return;
 	}
+	}
+
+	if (Date.now() >= deadline) {
+		break;
+	}
+
+	await page.waitForTimeout(300);
+	}
+
+	//
+	// A checkbox with no name of its own, in a row that has one. The page
+	// picker for a navigation menu lists pages as rows reading "Products",
+	// "About Us", each with an unlabelled checkbox, so no search by name
+	// reached them and "check these pages" found nothing to check.
+	//
+	//
+	// The nearest row to the name, not the first row containing it: the
+	// picker's rows sit inside an outer item that contains all of them, so
+	// "the first row with About Us in it" was that outer item, its first
+	// checkbox was Home's, and every page checked was Home - which passed,
+	// because checking something changed the screen.
+	//
+	for (const scope of await scopesFor(page)) {
+		const row = scope
+			.getByText(field, {exact: true})
+			.first()
+			.locator(
+				'xpath=ancestor::*[self::li or self::tr or @role="treeitem" or contains(concat(" ", normalize-space(@class), " "), " list-group-item ")][1]'
+			);
+
+		const box = row.locator('input[type="checkbox"]').first();
+
+		if (!(await box.count().catch(() => 0))) {
+			continue;
+		}
+
+		const own = await row
+			.evaluate((node, name) => {
+				const boxes = node.querySelectorAll('input[type="checkbox"]');
+				const text = ((node as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim();
+
+				return (boxes.length === 1) && text.startsWith(name);
+			}, field)
+			.catch(() => false);
+
+		if (!own) {
+			throw new Error(
+				`the row holding "${field}" is not a row of its own, so which ` +
+					`checkbox is its cannot be told`
+			);
+		}
+
+		if (on) {
+			await box.check({timeout: 5000});
+		}
+		else {
+			await box.uncheck({timeout: 5000});
+		}
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+
+	//
+	// "Click *Filter*, check *Author*": the Content Dashboard's Author is a
+	// plain menu item that opens a picker, not a box. A reader presses it, so
+	// this does - exactly one item by that exact name, and only to turn on.
+	//
+	if (on) {
+		for (const scope of await scopesFor(page)) {
+			const item = scope.getByRole('menuitem', {exact: true, name: field});
+
+			if (((await item.count().catch(() => 0)) === 1) && (await item.isVisible().catch(() => false))) {
+				await item.click({timeout: 5000});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+		}
 	}
 
 	throw new Error(
@@ -732,6 +832,13 @@ async function addComponentAction(
 	// saved: "Saved as Draft" on current releases, "Changes have been saved"
 	// on 2026.q1 - which says it on load too, so on its own it proves nothing.
 	//
+	//
+	// The search emptied again. The lesson never asks the reader to search,
+	// and while it holds text the panel hides its Fragments and Widgets tabs -
+	// so the next step, "Go to the *Widgets* tab", found no tab.
+	//
+	await search.fill('').catch(() => undefined);
+
 	await expect
 		.poll(() => fragments.count().catch(() => 0), {
 			message: `${name} was not added to the page`,
@@ -748,6 +855,256 @@ async function addComponentAction(
 	).toBeVisible({timeout: CHANGE_TIMEOUT * 2});
 
 	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Select a fragment or widget in the page editor, by the name a lesson uses.
+ *
+ * Through the Browser tab's page structure, as liferay-portal's
+ * PageEditorPage.selectFragment falls back to: the tree shows Page Header,
+ * Page Body, and Page Footer collapsed, so every node is expanded first, and a
+ * node's data-qa-id is the fragment's own name - Menu Display, Search Results.
+ * "In the header" or "in the footer" limits the search to that part of the
+ * tree, since a master page carries Menu Display in both. Checked by the
+ * fragment's Options button appearing.
+ */
+async function selectInEditorAction(
+	page: Page,
+	name: string,
+	region?: 'body' | 'footer' | 'header'
+) {
+	await page.getByRole('tab', {exact: true, name: 'Browser'}).click({timeout: 5000});
+
+	for (let pass = 0; pass < 40; pass++) {
+		const collapsed = page
+			.locator('.page-editor__page-structure button.component-expander[aria-expanded="false"], [role="treeitem"] > .c-inner button.component-expander[aria-expanded="false"]')
+			.first();
+
+		if (!(await collapsed.isVisible().catch(() => false))) {
+			break;
+		}
+
+		await collapsed.click({timeout: 3000}).catch(() => undefined);
+
+		await page.waitForTimeout(200);
+	}
+
+	const nodes = page.locator('[role="treeitem"]');
+
+	const listed = await nodes.evaluateAll((all) =>
+		all.map((node) => ({
+			name: node.getAttribute('data-qa-id') || '',
+			text: ((node as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim(),
+			visible: (node as HTMLElement).offsetParent !== null,
+		}))
+	);
+
+	const boundary = (label: string) =>
+		listed.findIndex((node) => node.text.startsWith(label));
+
+	const regions = {
+		body: [boundary('Page Body'), boundary('Page Footer')],
+		footer: [boundary('Page Footer'), listed.length],
+		header: [boundary('Page Header'), boundary('Page Body')],
+	};
+
+	const [from, to] = region ? regions[region] : [0, listed.length];
+
+	const matches = listed
+		.map((node, index) => ({...node, index}))
+		.filter((node) => node.visible && (node.index >= Math.max(0, from)) &&
+			(node.index < (to < 0 ? listed.length : to)) &&
+			((node.name === name) || node.text.startsWith(name)));
+
+	if (!matches.length) {
+		throw new Error(
+			`the page structure has no ${name}` + (region ? ` in the ${region}` : '')
+		);
+	}
+
+	//
+	// The fragment's own name first, a label second. The Product Lists Page
+	// composition holds a container labelled Search Results above the Search
+	// Results widget; the label matched first, and the container's menu has
+	// no Configuration. Only the widget carries the name as its data-qa-id.
+	//
+	const target = matches.find((node) => node.name === name) || matches[0];
+
+	await nodes.nth(target.index).click({timeout: 5000});
+
+	await expect(
+		page.locator('.page-editor__topper__item').getByRole('button', {name: 'Options'}).first(),
+		`${name} was clicked in the page structure but is not selected`
+	).toBeVisible({timeout: FIND_TIMEOUT});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Choose from the selected fragment's own menu: "click *Actions* for the
+ * widget, and select *Configuration*". The lesson's Actions is the fragment
+ * toolbar's Options button, as liferay-portal's clickFragmentOption uses it.
+ */
+async function fragmentOptionAction(page: Page, option: string) {
+	const options = page
+		.locator('.page-editor__topper__item')
+		.getByRole('button', {name: 'Options'})
+		.first();
+
+	await options.click({timeout: 5000});
+
+	const item = page.locator('.dropdown-menu.show').getByText(option, {exact: true}).first();
+
+	await expect(item, `the fragment's menu offers no ${option}`).toBeVisible({
+		timeout: FIND_TIMEOUT,
+	});
+
+	await item.click({timeout: 5000});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Go to a page through the Site Menu's page tree: "click *Page Tree*, expand
+ * *Products*, and select *Product List*". Every name but the last is a node to
+ * expand; the last is the page to open. Checked by the browser arriving on a
+ * page whose title carries its name - skipped, the step after it edited
+ * whatever page the browser was on.
+ */
+async function openFromPageTreeAction(page: Page, path: string[]) {
+	const menu = MENUS['Site Menu'];
+
+	if (!(await page.locator(menu.root).first().isVisible().catch(() => false))) {
+		await page.locator(menu.trigger).first().click({timeout: 5000});
+
+		await page.waitForTimeout(SETTLE);
+	}
+
+	//
+	// Only when the tree is not already showing. The Site Menu remembers the
+	// view it was left in, for the user, so on a second visit the tree is
+	// open and there is no Page Tree button to press.
+	//
+	if (!(await page.locator(menu.root).first().locator('[role="treeitem"]').first().isVisible().catch(() => false))) {
+		await page
+			.locator(menu.root)
+			.first()
+			.getByRole('button', {name: 'Page Tree'})
+			.or(page.locator(menu.root).first().getByRole('link', {name: 'Page Tree'}))
+			.first()
+			.click({timeout: 5000});
+	}
+
+	await page.waitForTimeout(SETTLE);
+
+	const node = (name: string) =>
+		page
+			.locator('[role="treeitem"]')
+			.filter({hasText: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)})
+			.first();
+
+	for (const parent of path.slice(0, -1)) {
+		const item = node(parent);
+
+		await expect(item, `the page tree has no ${parent}`).toBeVisible({timeout: FIND_TIMEOUT});
+
+		if ((await item.getAttribute('aria-expanded')) !== 'true') {
+			await item.locator('button').first().click({timeout: 5000}).catch(async () => {
+				await item.focus();
+
+				await page.keyboard.press('ArrowRight');
+			});
+		}
+
+		await page.waitForTimeout(SETTLE / 2);
+	}
+
+	const target = path[path.length - 1];
+
+	const leaf = node(target);
+
+	await expect(leaf, `the page tree has no ${target}`).toBeVisible({timeout: FIND_TIMEOUT});
+
+	await leaf.locator('a').first().or(leaf).first().click({timeout: 5000});
+
+	await expect
+		.poll(() => page.title(), {
+			message: `selecting ${target} in the page tree did not open it`,
+			timeout: CHANGE_TIMEOUT,
+		})
+		.toContain(target);
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Choose a value for a field, as a table row "Display Template | *Clarity
+ * Category Cards*" asks: from a native select, a dropdown, or a radio group.
+ * Checked by the field showing the value afterwards.
+ */
+async function chooseAction(page: Page, field: string, value: string) {
+	//
+	// Looked for until it appears (LESSONS.md, Rules Every Helper Keeps).
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (true) {
+	for (const exact of [true, false]) {
+		for (const scope of await scopesFor(page)) {
+			const select = scope.locator('select').and(scope.getByLabel(field, {exact})).first();
+
+			if (await select.isVisible().catch(() => false)) {
+				await select.selectOption({label: value}, {timeout: 5000});
+
+				await expect
+					.poll(() => select.evaluate((node) => {
+						const chosen = (node as HTMLSelectElement).selectedOptions[0];
+
+						return chosen ? chosen.text.trim() : '';
+					}), {message: `${field} does not show ${value}`, timeout: CHANGE_TIMEOUT})
+					.toBe(value);
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+
+			const combobox = scope.getByRole('combobox', {exact, name: field}).first();
+
+			if (await combobox.isVisible().catch(() => false)) {
+				await combobox.click({timeout: 5000});
+
+				await scope.getByRole('option', {exact: true, name: value}).first().click({timeout: 5000});
+
+				await expect(combobox, `${field} does not show ${value}`).toContainText(value, {timeout: CHANGE_TIMEOUT});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+
+			const radio = scope.getByRole('radio', {exact: true, name: value}).first();
+
+			if (await radio.isVisible().catch(() => false)) {
+				await radio.check({timeout: 5000});
+
+				await expect(radio, `${value} is not selected`).toBeChecked({timeout: CHANGE_TIMEOUT});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+		}
+	}
+
+	if (Date.now() >= deadline) {
+		break;
+	}
+
+	await page.waitForTimeout(300);
+	}
+
+	throw new Error(`no list, dropdown, or option named "${field}" offers ${value} on this screen`);
 }
 
 /**
@@ -800,6 +1157,12 @@ export async function waitForReindex(page: Page) {
  * already what the lesson asks for, so there being none open is not a failure.
  */
 async function closeModalAction(page: Page) {
+	//
+	// Looked for until it appears (LESSONS.md, Rules Every Helper Keeps).
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (true) {
 	for (const frame of [...page.frames()].reverse()) {
 		const dialog = frame
 			.locator('.modal.show, .modal.d-block, [role="dialog"]')
@@ -821,6 +1184,19 @@ async function closeModalAction(page: Page) {
 
 		return;
 	}
+
+	if (Date.now() >= deadline) {
+		break;
+	}
+
+	await page.waitForTimeout(300);
+	}
+
+	//
+	// Nothing open to close is a failure, not a pass: "close the modal" that
+	// found no modal had closed nothing, and the step reported done.
+	//
+	throw new Error('no dialog is open to close');
 }
 
 /**
@@ -878,7 +1254,12 @@ async function attachAction(page: Page, label: string, file: string) {
 		// ordinary find timeout, which is why this step passed when run on
 		// its own and failed in a suite that had just reset the instance.
 		//
-		const deadline = Date.now() + (attempt ? 45000 : 0);
+		//
+		// The first look waits too (LESSONS.md, Rules Every Helper Keeps): for
+		// the file field itself, or for the button that opens a picker, which
+		// ends it early. One look at a dialog still loading found neither.
+		//
+		const deadline = Date.now() + (attempt ? 45000 : FIND_TIMEOUT);
 
 		do {
 			for (const scope of await scopesFor(page)) {
@@ -893,6 +1274,10 @@ async function attachAction(page: Page, label: string, file: string) {
 
 					return;
 				}
+			}
+
+			if (!attempt && (await page.locator(`[aria-label="Select ${label}"], [title="Select ${label}"]`).or(page.getByRole('button', {name: `Select ${label}`})).or(page.getByRole('button', {name: 'Select Image'})).count().catch(() => 0))) {
+				break;
 			}
 
 			if (Date.now() < deadline) {
@@ -1333,6 +1718,19 @@ async function reachApplication(
 		await page.waitForTimeout(SETTLE);
 	}
 
+	//
+	// Back from the page tree. The Site Menu reopens in whatever view it was
+	// left in, for this user, and in the page tree view none of its sections
+	// are on the screen - only a Back to Menu button.
+	//
+	const back = panel.getByRole('button', {exact: true, name: 'Back to Menu'});
+
+	if (await back.isVisible().catch(() => false)) {
+		await back.click({timeout: 4000});
+
+		await page.waitForTimeout(SETTLE);
+	}
+
 	if (section) {
 		//
 		// A section of this menu is a tab button on 2026.q1 LTS and a link on
@@ -1668,6 +2066,53 @@ async function pressAction(
 	within?: string,
 	icon?: string
 ) {
+	//
+	// A navigation menu item's Actions is a button named "View <item>
+	// Options". "For the first About Us page item" picks among items of the
+	// same name by the ordinal - a menu can hold About Us twice.
+	//
+	if ((label === 'Actions') && within) {
+		const ordinals: Record<string, number> = {fifth: 4, first: 0, fourth: 3, second: 1, third: 2};
+		const found = within.match(/^(first|second|third|fourth|fifth)\s+(.+)$/i);
+		const index = found ? ordinals[found[1].toLowerCase()] : 0;
+		const item = found ? found[2] : within;
+
+		//
+		// Waited for: after Select, the menu editor draws its items a moment
+		// later, and one look found none and fell through to a search for a
+		// control named Actions, which does not exist.
+		//
+		const deadline = Date.now() + FIND_TIMEOUT;
+
+		while (Date.now() < deadline) {
+			for (const scope of await scopesFor(page)) {
+				//
+				// By its label, not its role: the button is hidden until the
+				// item is hovered, and getByRole leaves hidden elements out.
+				// A reader hovers the item first, so this does too.
+				//
+				const buttons = scope.locator(`button[aria-label="View ${item.replace(/"/g, '\\"')} Options"]`);
+
+				if ((await buttons.count().catch(() => 0)) > index) {
+					const button = buttons.nth(index);
+
+					await button
+						.locator('xpath=ancestor::*[contains(@class, "card") or contains(@class, "menu-item")][1]')
+						.hover({timeout: 5000})
+						.catch(() => undefined);
+
+					await button.click({timeout: 5000});
+
+					await page.waitForTimeout(SETTLE);
+
+					return;
+				}
+			}
+
+			await page.waitForTimeout(300);
+		}
+	}
+
 	watchPosts(page);
 
 	//
@@ -1806,6 +2251,25 @@ async function pressAction(
 					`nav li:text-is("${escaped}"), ` +
 					`[role="tablist"] li:text-is("${escaped}")`
 			),
+			//
+			// An entry in an item selector. The web content picker lists each
+			// article as a row holding a paragraph with its title and nothing
+			// with a role or a name, so "select the Cookie Policy article"
+			// found no control. The nearest row around the exact title is the
+			// entry, as with an unlabelled checkbox's row in toggle().
+			//
+			//
+			// Never a container holding a checkbox, and never a card. In the
+			// Select Author table, wrapped in a card, "the nearest row around
+			// Walter Douglas" was the card around the whole table: the click
+			// landed on whatever sat at its centre, and his box stayed empty.
+			// A row with a box is the row-checkbox search's to handle, below.
+			//
+			scope
+				.getByText(label, {exact: true})
+				.locator(
+					'xpath=ancestor::*[self::dd or @data-value or contains(concat(" ", normalize-space(@class), " "), " list-group-item ")][1][not(.//input[@type="checkbox"])]'
+				),
 			scope
 				.getByRole('button', {exact: false, name: label})
 				.or(scope.getByRole('link', {exact: false, name: label}))
@@ -1816,6 +2280,16 @@ async function pressAction(
 							`[role="tab"]:has-text("${escaped}"), ` +
 							`[role="button"]:has-text("${escaped}")`
 					)
+				),
+			//
+			// The same name in other capitals, last and only where it is the
+			// one match. The Pages course lists "Terms of use"; the article is
+			// "Terms of Use", and a reader does not stop at a capital letter.
+			//
+			scope
+				.getByText(new RegExp(`^\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'))
+				.locator(
+					'xpath=ancestor-or-self::*[self::button or self::a or @role="button" or @role="menuitem" or self::dd or @data-value or contains(concat(" ", normalize-space(@class), " "), " list-group-item ")][1][not(.//input[@type="checkbox"])]'
 				),
 		];
 
@@ -2279,7 +2753,14 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 	// substring pass below returned labels and wrapper elements, and the fill
 	// failed with "Element is not an <input>" while naming the right field.
 	//
-	const FILLABLE = 'input, textarea, select, [contenteditable="true"]';
+	//
+	// Only what takes typing. "Name" loosely also names the box labelled "Use
+	// Custom Name", and fill() on a checkbox throws - or, had it been a text
+	// field of the same name, would have typed into the wrong one.
+	//
+	const FILLABLE =
+		'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]), ' +
+		'textarea, select, [contenteditable="true"]';
 
 	const quoted = field.replace(/"/g, '');
 
@@ -2308,7 +2789,16 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 	//
 	const deadline = Date.now() + FIND_TIMEOUT;
 
+	//
+	// A looser pass that finds something is trusted only after the exact
+	// pass has looked again. A dialog that loads between the two passes of
+	// one round was searched exactly while empty and loosely once full, so
+	// the loose match won over the exact one sitting beside it.
+	//
+	let looseFound = false;
+
 	while (Date.now() < deadline) {
+	rounds:
 	for (const pass of ['exact', 'label', 'loose']) {
 		for (const frame of await scopesFor(page)) {
 			let candidate: Locator;
@@ -2332,12 +2822,20 @@ async function findField(page: Page, field: string): Promise<Locator | null> {
 			}
 
 			if (await candidate.count().catch(() => 0)) {
-				return candidate;
+				if ((pass === 'exact') || looseFound) {
+					return candidate;
+				}
+
+				looseFound = true;
+
+				break rounds;
 			}
 		}
 	}
 
-		await page.waitForTimeout(250);
+		if (!looseFound) {
+			await page.waitForTimeout(250);
+		}
 	}
 
 	return null;
@@ -2501,7 +2999,40 @@ async function screenPrint(page: Page): Promise<string> {
 				return text.replace(/\s+/g, ' ').trim();
 			});
 
-			return `${page.url()}|${shown.length}|${shown.slice(0, 400)}`;
+			//
+			// Every dialog is a frame of its own. Choosing a library in the
+			// web content picker changes nothing outside the dialog, and a
+			// print of the main frame alone called that working click one
+			// that did nothing. A frame torn down mid-read is left out rather
+			// than failing the read.
+			//
+			const frames: string[] = [];
+
+			for (const frame of page.frames()) {
+				if (frame === page.mainFrame()) {
+					continue;
+				}
+
+				//
+				// Only a frame on screen. A hidden frame that polls would
+				// otherwise count as the click having done something.
+				//
+				const owner = await frame.frameElement().catch(() => null);
+
+				if (!owner || !(await owner.isVisible().catch(() => false))) {
+					continue;
+				}
+
+				const inside = await frame
+					.evaluate(() => (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').trim())
+					.catch(() => null);
+
+				if (inside !== null) {
+					frames.push(`${frame.url()}|${inside.length}|${inside.slice(0, 200)}`);
+				}
+			}
+
+			return `${page.url()}|${shown.length}|${shown.slice(0, 400)}|${frames.join('|')}`;
 		}
 		catch (error) {
 			await page.waitForTimeout(300);
@@ -2513,6 +3044,66 @@ async function screenPrint(page: Page): Promise<string> {
 	// a value that would silently satisfy a comparison.
 	//
 	throw new Error('the screen could not be read to compare before and after');
+}
+
+/**
+ * Put a navigation menu's top-level items in the order a lesson lists.
+ *
+ * "Drag and drop the pages into this order" is done as a reader does it:
+ * each item dragged just below the item it should follow, which the menu
+ * editor saves at once. The order is then
+ * read back and compared, so a drag that did nothing fails the step instead
+ * of passing it.
+ */
+async function reorderMenuAction(page: Page, names: string[]) {
+	const items = page.locator('[role="menubar"] [role="menuitem"][data-nesting-level="0"]');
+
+	const current = async () =>
+		(await items.evaluateAll((all) => all.map((node) => node.getAttribute('aria-label') || '')))
+			.map((label) => label.replace(/^Open (.*) \([^)]+\) Configuration Panel$/, '$1'))
+			.filter((name) => names.includes(name));
+
+	const handle = (name: string) =>
+		page
+			.locator(`[role="menuitem"][data-nesting-level="0"][aria-label^="Open ${name.replace(/"/g, '\\"')} ("]`)
+			.locator('[draggable="true"]')
+			.first();
+
+	await expect(items.first(), 'the menu editor shows no items to reorder').toBeVisible({timeout: FIND_TIMEOUT});
+
+	for (let index = 0; index < names.length; index++) {
+		const now = await current();
+
+		if (!now.includes(names[index])) {
+			throw new Error(`the menu has no item named "${names[index]}" to move`);
+		}
+
+		if (now[index] === names[index]) {
+			continue;
+		}
+
+		//
+		// Onto the top edge of the first item, and otherwise onto the bottom
+		// edge of the item that should come before it. A drop on the top edge
+		// of any item but the first did nothing at all (probed on 2026.q1.1:
+		// FAQ onto Careers stayed put; FAQ onto the bottom of Blog moved).
+		//
+		if (index === 0) {
+			await handle(names[index]).dragTo(handle(now[0]), {targetPosition: {x: 20, y: 4}});
+		}
+		else {
+			const before = handle(names[index - 1]);
+			const box = await before.boundingBox();
+
+			await handle(names[index]).dragTo(before, {targetPosition: {x: 20, y: Math.max(1, Math.round((box ? box.height : 40) - 4))}});
+		}
+
+		await expect.poll(async () => (await current()).indexOf(names[index]), {timeout: CHANGE_TIMEOUT}).toBe(index);
+
+		await page.waitForTimeout(SETTLE);
+	}
+
+	await expect.poll(current, {message: 'the menu is not in the order the lesson lists', timeout: CHANGE_TIMEOUT}).toEqual(names);
 }
 
 /**
@@ -2538,12 +3129,55 @@ function observed<A extends unknown[], R>(
 
 export const addComponent = observed('add', addComponentAction);
 export const attach = observed('attach', attachAction);
+export const choose = observed('choose', chooseAction);
 export const closeModal = observed('close', closeModalAction);
 export const download = observed('download', downloadAction);
 export const fill = observed('fill', fillAction);
+export const fragmentOption = observed('option', fragmentOptionAction);
+export const openFromPageTree = observed('tree', openFromPageTreeAction);
 export const openMenu = observed('open', openMenuAction);
-export const press = observed('press', pressAction);
+//
+// Publish in the page editor, checked by the editor closing. A publish that
+// did not happen still passed: the "page was created" message changed the
+// screen at the same moment, the next steps ran inside the editor, and the
+// exercise failed two steps later on something unrelated. The editor's
+// address carries p_l_mode=edit until the page is published.
+//
+async function pressChecked(page: Page, label: string, within?: string, icon?: string) {
+	const editing = () => /[?&]p_l_mode=edit\b/.test(page.url());
+
+	if ((label !== 'Publish') || !editing()) {
+		return pressAction(page, label, within, icon);
+	}
+
+	for (let attempt = 0; attempt < 2; attempt++) {
+		if (attempt === 0) {
+			await pressAction(page, label, within, icon);
+		}
+		else {
+			await page.getByRole('button', {exact: true, name: 'Publish'}).first().click({timeout: 5000}).catch(() => undefined);
+		}
+
+		const deadline = Date.now() + CHANGE_TIMEOUT * 2;
+
+		while ((Date.now() < deadline) && editing()) {
+			await page.waitForTimeout(300);
+		}
+
+		if (!editing()) {
+			await page.waitForTimeout(SETTLE);
+
+			return;
+		}
+	}
+
+	throw new Error('Publish was pressed, but the page editor stayed open: the page was not published');
+}
+
+export const press = observed('press', pressChecked);
 export const pressKeys = observed('keys', pressKeysAction);
 export const reload = observed('reload', reloadAction);
+export const reorderMenu = observed('reorder', reorderMenuAction);
+export const selectInEditor = observed('select', selectInEditorAction);
 export const toggle = observed('toggle', toggleAction);
 export const transfer = observed('transfer', transferAction);

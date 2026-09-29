@@ -88,17 +88,22 @@ commit the result - edits made directly to a test file are overwritten.
 
 ## Before Changing The Helpers
 
-The helpers, this README, the configuration, and LESSONS.md are shared by every
-course workspace. The copies here are synced from one shared engine, and a
-sync refuses to overwrite a copy edited in place, so make a change in the
-shared engine rather than here.
+The helpers, this README, and the configuration are shared by every course
+workspace. The copies here are synced from one shared engine, and a sync
+refuses to overwrite a copy edited in place, so make a change in the shared
+engine rather than here.
 
-Read [LESSONS.md](LESSONS.md) and [PLAYWRIGHT-PRACTICES.md](PLAYWRIGHT-PRACTICES.md).
-LESSONS.md records what this engine learned from runs
-against real instances: which Liferay controls carry no name, where a modal
-hides a form, what differs between DXP releases, and which phrases in a lesson
-are not controls at all. Every rule in it was paid for by a test that passed
-while doing nothing, or failed while blaming the wrong thing.
+Two documents every course shares live only there, not in each workspace:
 
-Add to it when a run teaches you something a future run would otherwise
-rediscover.
+- [LESSONS.md](https://github.com/ericthmoritsuka/liferay-learn/blob/course-tests-beside-lessons/.claude/scripts/course-check/playwright/engine/LESSONS.md): what this engine learned from runs against
+  real instances - which Liferay controls carry no name, where a modal hides a
+  form, what differs between DXP releases, which phrases in a lesson are not
+  controls. Every rule in it was paid for by a test that passed while doing
+  nothing, or failed while blaming the wrong thing.
+- [PLAYWRIGHT-PRACTICES.md](https://github.com/ericthmoritsuka/liferay-learn/blob/course-tests-beside-lessons/.claude/scripts/course-check/playwright/engine/PLAYWRIGHT-PRACTICES.md): what Playwright's
+  own documentation recommends, where this engine departs from it, and why.
+
+Read both before changing a helper, and add to LESSONS.md when a run teaches
+you something a future run would otherwise rediscover.
+
+Both are in a private repository for now, until the shared engine has a permanent home. Ask Eric Moritsuka for access if the links do not open.
