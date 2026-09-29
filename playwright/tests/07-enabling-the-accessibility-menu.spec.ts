@@ -1,0 +1,67 @@
+/**
+ * Enabling the Accessibility Menu
+ *
+ * Generated from courses/latest/en/mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics.md.
+ * Edit the lesson and regenerate; edits here are overwritten.
+ *
+ * A pass means nothing blocked a reader. It does not mean the
+ * exercise built the right thing - nothing records what it should
+ * build.
+ */
+import {test} from '@playwright/test';
+
+import {addComponent, attach, choose, closeModal, download, enableSomeOptions, fill, fragmentOption, goHome, openFromPageTree, openMenu, openPageEditor, openPageSettings, press, pressKeys, reload, reorderMenu, selectInEditor, toggle, transfer, verifyHead, visitAsGuest, visitInNewBrowser, waitForReindex} from '../helpers/liferay';
+import {CAPTURE, armCapture, capture} from '../helpers/screenshot';
+import {signIn} from '../helpers/sign-in';
+
+//
+// The style guide's display width, captured at twice it.
+//
+test.use(CAPTURE);
+
+test('Enabling the Accessibility Menu', async ({page}) => {
+	await signIn(page, 'admin');
+
+	// Step 1. Open the *Site Menu* (![](../../images/icon-menu.png)), expand *Configuration*, and click *Site Settings*.
+	await test.step('Step 1. Open the *Site Menu* (![](../../images/icon-menu.png)), expand *Configuration*, and click *Site Settings*.', async () => {
+		await openMenu(page, 'Site Menu', 'Configuration', 'Site Settings');
+	});
+
+	// Step 2. Click *Accessibility*, check *Enable Accessibility Menu*, and click *Update*.
+	await test.step('Step 2. Click *Accessibility*, check *Enable Accessibility Menu*, and click *Update*.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/08.png']);
+		await press(page, 'Accessibility');
+		await toggle(page, 'Enable Accessibility Menu', true);
+		await press(page, 'Update');
+
+		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/08.png'});
+	});
+
+	// Step 3. Go to the *Home* page.
+	await test.step('Step 3. Go to the *Home* page.', async () => {
+		await goHome(page);
+	});
+
+	// Step 4. Refresh the browser window and hit the Tab key twice.
+	await test.step('Step 4. Refresh the browser window and hit the Tab key twice.', async () => {
+		await reload(page);
+		await pressKeys(page, 'Tab', 2);
+	});
+
+	// Step 5. Once the "Open Accessibility Menu" button appears, hit Enter or click it.
+	await test.step('Step 5. Once the "Open Accessibility Menu" button appears, hit Enter or click it.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/09.png']);
+		await press(page, 'Open Accessibility Menu');
+
+		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/09.png'});
+	});
+
+	// Step 6. Enable some of the options, close the menu, and verify the changes on the page.
+	await test.step('Step 6. Enable some of the options, close the menu, and verify the changes on the page.', async () => {
+		await armCapture(page, ['mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/10.png']);
+		await enableSomeOptions(page);
+
+		await capture(page, {name: 'mastering-search-engine-optimization-with-liferay/06-improving-claritys-seo-with-analytics-and-performance-metrics/00-improving-claritys-seo-with-analytics-and-performance-metrics/images/10.png'});
+	});
+
+});

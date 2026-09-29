@@ -1,0 +1,3183 @@
+/**
+ * Doing what a course step says, to a running Liferay.
+ *
+ * Every function here is shaped by a failure seen against a real bundle, and
+ * each carries the reason, because the obvious version of each one is wrong
+ * in a way that is not obvious until it has cost an afternoon.
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+
+import {expect, Frame, Locator, Page, test} from '@playwright/test';
+
+import {candidate} from './screenshot';
+
+/**
+ * How Liferay's two menus open. Taken from liferay-portal's own page objects
+ * rather than guessed, and two handles apiece because the attribute differs
+ * by release: a 2026.q1 LTS bundle answers to applicationsMenu, a 2026.q3
+ * bundle to globalMenu. A test pinned to either reports the other release as
+ * a product with no menus at all.
+ */
+//
+// How to open each menu, across DXP versions.
+//
+// The trigger is not the same from one release to the next: on 2026.q3 the
+// Applications Menu button announces itself as "Open Applications Menu",
+// while on 2026.q1 LTS it carries no aria-label at all - only
+// data-qa-id="applicationsMenu". A course workspace pins its own release, so
+// both have to work or a suite passes on one bundle and cannot find the menu
+// on another.
+//
+// data-qa-id is the stable anchor and is listed first for that reason; the
+// aria-labels follow as a fallback for builds that lack it.
+//
+//
+// What a lesson calls a control, and what the product calls it.
+//
+// These are not guesses. Each comes from liferay-portal's own Playwright page
+// objects, which address the real element: the row menu a lesson calls
+// "Actions" is named "Open Page Options Menu" in the Pages application
+// (pages/layout-admin-web/PagesAdminPage.ts), and a lesson has no reason to
+// use that name because it is not what the reader sees.
+//
+// A lesson naming the visible label is correct. The map is how the visible
+// label reaches the element underneath it.
+//
+const LABEL_ALIASES: Record<string, string[]> = {
+	Actions: [
+		'Open Page Options Menu',
+		'Open Options Menu',
+		'Show Actions',
+		'Options',
+	],
+};
+
+//
+// Deliberately not here: Configure -> Configuration, and New -> Add.
+//
+// Both look reasonable and both are wrong. "Configuration" is a Site Menu
+// section, so aliasing Configure to it made a row's Configure action also
+// match a navigation link and leave the exercise on the wrong screen. "Add"
+// is the commit button on half the forms in the product, so aliasing New to
+// it would submit a form instead of opening one.
+//
+// An alias is only safe where the two names denote the same control. Where
+// they merely sound alike, the ambiguity check is the better answer.
+
+
+const MENUS: Record<string, {root: string; trigger: string}> = {
+	'Global Menu': {
+		//
+		// And it is not the same kind of thing either: on 2026.q1 LTS this
+		// menu is a modal (.applications-menu-modal), on 2026.q3 a dropdown
+		// (.global-menu). A root matching only one means the menu opens and
+		// the code concludes it did not.
+		//
+		root:
+			'.applications-menu-modal.show, .applications-menu-wrapper, ' +
+			'.global-menu, .dropdown-menu.show',
+		trigger:
+			'[data-qa-id="applicationsMenu"], [data-qa-id="globalMenu"], ' +
+			'[data-testid="globalMenu"], ' +
+			'[aria-label="Open Applications Menu"], ' +
+			'[aria-label="Applications Menu"]',
+	},
+	'Site Menu': {
+		//
+		// Left as the dropdown alone. Adding the q1 sidebar class here made
+		// this match a panel that is always present, so the code believed a
+		// menu was standing over every screen - and Enabling the
+		// Accessibility Menu, which had been passing, stopped being able to
+		// click anything. Verified by reverting this line alone.
+		//
+		root: '.product-menu',
+		trigger:
+			'[data-qa-id="productMenu"], ' +
+			'[data-qa-id="sideNavigationToggler"], ' +
+			'[aria-label="Open Product Menu"], ' +
+			'[aria-label="Toggle Product Menu"]',
+	},
+};
+
+/** Long enough for a panel or dialog to arrive after the network goes quiet. */
+//
+// How long a control is given to appear before it is treated as absent.
+//
+const FIND_TIMEOUT = 8000;
+
+//
+// How long a click is given to change the screen before the absence of a
+// change is treated as evidence.
+//
+const CHANGE_TIMEOUT = 10000;
+
+const HOME = process.env.COURSE_HOME || '/web/clarity/home';
+
+const SETTLE = 900;
+
+/**
+ * Fill the field a step names.
+ *
+ * Searches every frame, because Liferay opens a create form inside an iframe
+ * modal and a page level locator cannot see into it. The field is on the
+ * screen; it is one frame down.
+ *
+ * Reads the value back afterwards. A field that fills itself in from another
+ * accepts the typing and ends up holding both values, and nothing throws.
+ */
+async function fillAction(
+	page: Page,
+	field: string,
+	value: string,
+	where: {language?: string; section?: string} = {}
+) {
+	//
+	// The panel the field sits in, opened when the lesson named one.
+	//
+	// A page's configuration repeats field names across its panels, and a
+	// collapsed panel's fields are not on the screen at all - so naming the
+	// panel is both how the right field is found and how it becomes
+	// reachable.
+	//
+	if (where.section) {
+		await openSection(page, where.section);
+	}
+
+	const input = await findField(page, field);
+
+	expect(
+		input,
+		where.language
+			? `no field named "${field}" for ${where.language} is on this ` +
+				`screen, in any frame`
+			: `no field named "${field}" is on this screen, in any frame`
+	).not.toBeNull();
+
+	//
+	// The locale the value belongs to, switched on this field's own language
+	// button after the field is found.
+	//
+	// A localised field is one input whose language button swaps the value it
+	// shows. Typing by label alone puts the Spanish text in the English box and
+	// then reads it back successfully - a wrong result that reports itself as a
+	// right one. That happened: the switch clicked whichever language button
+	// came first on the page and returned quietly when no option read
+	// "Spanish", so the SEO tab's English title and keywords were overwritten
+	// with the Spanish ones and the test passed.
+	//
+	if (where.language) {
+		await chooseLanguage(page, where.language, input!);
+	}
+
+	await input!.scrollIntoViewIfNeeded({timeout: 4000}).catch(() => undefined);
+
+	//
+	// Said plainly. Liferay disables a field until whatever it describes
+	// exists - the alt text of an image that has not been chosen yet - and a
+	// bare fill spends fifteen seconds waiting for it to become editable and
+	// then reports a timeout that names nothing.
+	//
+	await expect(
+		input!,
+		`the field "${field}" is on this screen but disabled, so something ` +
+			`the step depends on has not been done yet`
+	).toBeEditable({timeout: 5000});
+
+	await input!.fill(value);
+
+	await expect(
+		input!,
+		`the field "${field}" does not hold what was typed into it`
+	).toHaveValue(value);
+}
+
+/**
+ * Expand a named panel of a form, where one exists.
+ *
+ * A lesson writes a field's path as "Settings > Image Alt Description", and
+ * the first part is not always a panel on the screen: on the Open Graph tab
+ * the sections are General, Design, SEO, Open Graph and Custom Meta Tags, and
+ * nothing is called Settings. Clicking whatever else answers to that word
+ * navigated away from the form the step was filling, and the fill then timed
+ * out against a screen that had moved.
+ *
+ * So this expands a collapsed disclosure and does nothing else. A disclosure
+ * says what it is by carrying aria-expanded; anything without it is a link or
+ * a tab that would take the reader somewhere, which is never what naming a
+ * field's panel asks for.
+ */
+async function openSection(page: Page, section: string) {
+	const escaped = section.replace(/"/g, '\\"');
+
+	for (const scope of await scopesFor(page)) {
+		const heading = scope
+			.locator(
+				`[aria-expanded]:has-text("${escaped}")`
+			)
+			.first();
+
+		if (!(await heading.count().catch(() => 0))) {
+			continue;
+		}
+
+		if ((await heading.getAttribute('aria-expanded').catch(() => null)) === 'true') {
+			return;
+		}
+
+		await heading.click({timeout: 3000}).catch(() => undefined);
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+}
+
+/**
+ * What a lesson calls a language, as the locale id Liferay's language menu
+ * carries. A lesson may also name the locale itself, "es-ES".
+ */
+const LOCALES: Record<string, string> = {
+	Arabic: 'ar-SA',
+	Catalan: 'ca-ES',
+	Chinese: 'zh-CN',
+	Dutch: 'nl-NL',
+	English: 'en-US',
+	Finnish: 'fi-FI',
+	French: 'fr-FR',
+	German: 'de-DE',
+	Hungarian: 'hu-HU',
+	Japanese: 'ja-JP',
+	Portuguese: 'pt-BR',
+	Spanish: 'es-ES',
+	Swedish: 'sv-SE',
+};
+
+/**
+ * Switch one localized field to the language a value belongs to.
+ *
+ * The field's own language button - .input-localized-trigger in its
+ * .form-group - opens a menu of a[role="menuitem"] entries carrying
+ * data-languageid (es_ES) and reading "es-ES Not Translated". The button then
+ * reads the locale it shows, which is what proves the switch happened.
+ */
+async function chooseLanguage(page: Page, language: string, input: Locator) {
+	const locale = /^[a-z]{2}[-_][A-Z]{2}$/.test(language)
+		? language.replace('_', '-')
+		: LOCALES[language];
+
+	if (!locale) {
+		throw new Error(
+			`"${language}" is not a language this knows the locale of - add it ` +
+				`to LOCALES`
+		);
+	}
+
+	const trigger = input
+		.locator(
+			'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " form-group ")][1]'
+		)
+		.locator('.input-localized-trigger')
+		.first();
+
+	await expect(
+		trigger,
+		`the field has no language button, so a ${language} value cannot be ` +
+			`put in its own locale`
+	).toBeVisible({timeout: FIND_TIMEOUT});
+
+	if (((await trigger.textContent()) || '').trim() === locale) {
+		return;
+	}
+
+	await trigger.click({timeout: 5000});
+
+	const option = input
+		.locator('xpath=ancestor::body[1]')
+		.locator(
+			`.lfr-icon-menu-open a[role="menuitem"][data-languageid="${locale.replace('-', '_')}"]`
+		)
+		.last();
+
+	await option.click({timeout: 5000});
+
+	await expect(
+		trigger,
+		`the field's language button did not switch to ${locale}`
+	).toHaveText(locale, {timeout: 5000});
+
+	await page.waitForTimeout(SETTLE / 3);
+}
+
+/**
+ * Turn a named setting on or off.
+ *
+ * A lesson writes these as a value - "Use Custom Title | *Enabled*" - and
+ * they were reported as values this could not type. They are not values to
+ * type at all, they are switches to operate, and skipping them leaves the
+ * field they govern disabled: the step after asks for Custom Title and finds
+ * it present, correctly named, and not editable.
+ */
+async function toggleAction(page: Page, field: string, on: boolean) {
+	//
+	// Exactly first, then as a substring.
+	//
+	// Liferay puts a setting's help text inside its label, so the box a
+	// lesson calls "Use Custom Title" announces itself as "Use Custom Title
+	// Use a custom title for this page..." and no exact match reaches it.
+	//
+	//
+	// Looked for until it appears, as press() does. A single look straight
+	// after the step that opens the form - New, Filter, a settings tab -
+	// found nothing while the dialog or menu was still loading, and the
+	// setting read as not on the screen.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (true) {
+	for (const exact of [true, false]) {
+	for (const scope of await scopesFor(page)) {
+		//
+		// Only something that can be checked. A label search on its own also
+		// found the menu editor's link named About Us, behind the page picker,
+		// and check() failed on it as "not a checkbox".
+		//
+		const control = scope
+			.getByRole('checkbox', {exact, name: field})
+			.or(scope.getByRole('switch', {exact, name: field}))
+			.or(scope.getByRole('menuitemcheckbox', {exact, name: field}))
+			.or(
+				scope
+					.getByLabel(field, {exact})
+					.and(scope.locator('input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]'))
+			)
+			.first();
+
+		if (!(await control.count().catch(() => 0))) {
+			continue;
+		}
+
+		if (on) {
+			await control.check({timeout: 5000});
+		}
+		else {
+			await control.uncheck({timeout: 5000});
+		}
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+	}
+
+	if (Date.now() >= deadline) {
+		break;
+	}
+
+	await page.waitForTimeout(300);
+	}
+
+	//
+	// A checkbox with no name of its own, in a row that has one. The page
+	// picker for a navigation menu lists pages as rows reading "Products",
+	// "About Us", each with an unlabelled checkbox, so no search by name
+	// reached them and "check these pages" found nothing to check.
+	//
+	//
+	// The nearest row to the name, not the first row containing it: the
+	// picker's rows sit inside an outer item that contains all of them, so
+	// "the first row with About Us in it" was that outer item, its first
+	// checkbox was Home's, and every page checked was Home - which passed,
+	// because checking something changed the screen.
+	//
+	for (const scope of await scopesFor(page)) {
+		const row = scope
+			.getByText(field, {exact: true})
+			.first()
+			.locator(
+				'xpath=ancestor::*[self::li or self::tr or @role="treeitem" or contains(concat(" ", normalize-space(@class), " "), " list-group-item ")][1]'
+			);
+
+		const box = row.locator('input[type="checkbox"]').first();
+
+		if (!(await box.count().catch(() => 0))) {
+			continue;
+		}
+
+		const own = await row
+			.evaluate((node, name) => {
+				const boxes = node.querySelectorAll('input[type="checkbox"]');
+				const text = ((node as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim();
+
+				return (boxes.length === 1) && text.startsWith(name);
+			}, field)
+			.catch(() => false);
+
+		if (!own) {
+			throw new Error(
+				`the row holding "${field}" is not a row of its own, so which ` +
+					`checkbox is its cannot be told`
+			);
+		}
+
+		if (on) {
+			await box.check({timeout: 5000});
+		}
+		else {
+			await box.uncheck({timeout: 5000});
+		}
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+
+	//
+	// "Click *Filter*, check *Author*": the Content Dashboard's Author is a
+	// plain menu item that opens a picker, not a box. A reader presses it, so
+	// this does - exactly one item by that exact name, and only to turn on.
+	//
+	if (on) {
+		for (const scope of await scopesFor(page)) {
+			const item = scope.getByRole('menuitem', {exact: true, name: field});
+
+			if (((await item.count().catch(() => 0)) === 1) && (await item.isVisible().catch(() => false))) {
+				await item.click({timeout: 5000});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+		}
+	}
+
+	throw new Error(
+		`no setting named "${field}" is on this screen to turn ` +
+			`${on ? 'on' : 'off'}`
+	);
+}
+
+/**
+ * Move items between the two columns of a dual list box.
+ *
+ * A lesson writes "Use the *left arrow* to remove the *Audience* and *Stage*
+ * vocabularies", and the arrow alone does nothing: the items have to be
+ * selected in their column first. Each column is a native multiple select,
+ * and the arrows are named "Transfer Item Left to Right" and "Transfer Item
+ * Right to Left" - both taken from liferay-portal's own page objects
+ * (pages/site-admin-web/SiteSettingsLocalizationPage.ts), which address the
+ * columns by position and select options directly.
+ *
+ * An option reads "Audience (Global)" where the lesson says Audience, so the
+ * lesson's word matches the option's name or its name before the scope in
+ * brackets. Anything else matching is refused rather than resolved, for the
+ * same reason an ambiguous label is.
+ *
+ * The move is checked in the other column afterwards. The arrow is disabled
+ * when a column is full, and clicking a disabled arrow changes nothing and
+ * throws nothing.
+ */
+async function transferAction(
+	page: Page,
+	direction: 'left' | 'right',
+	items: string[]
+) {
+	const arrow =
+		direction === 'left'
+			? 'Transfer Item Right to Left'
+			: 'Transfer Item Left to Right';
+
+	//
+	// Retried until the lists arrive. The dialog they are in is an iframe that
+	// loads after the click opening it returns, and one look found no lists
+	// while the dialog was still loading.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (Date.now() < deadline) {
+	for (const scope of await scopesFor(page)) {
+		const lists = scope.getByRole('listbox');
+
+		if ((await lists.count().catch(() => 0)) < 2) {
+			continue;
+		}
+
+		const source = lists.nth(direction === 'left' ? 1 : 0);
+		const target = lists.nth(direction === 'left' ? 0 : 1);
+
+		const options = await source
+			.locator('option')
+			.evaluateAll((all) =>
+				all.map((option) => ({
+					text: (option.textContent || '').trim(),
+					value: (option as HTMLOptionElement).value,
+				}))
+			);
+
+		const values = items.map((item) => {
+			const matches = options.filter(
+				(option) =>
+					option.text === item || option.text.startsWith(`${item} (`)
+			);
+
+			if (matches.length !== 1) {
+				throw new Error(
+					`"${item}" matches ${matches.length} items in the column ` +
+						`it should move from: ${options
+							.map((option) => option.text)
+							.join(', ')}`
+				);
+			}
+
+			return matches[0].value;
+		});
+
+		await source.selectOption(values);
+
+		await scope.getByLabel(arrow, {exact: true}).click({timeout: 5000});
+
+		for (const value of values) {
+			await expect(
+				target.locator(`option[value="${value}"]`)
+			).toHaveCount(1, {timeout: CHANGE_TIMEOUT});
+		}
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+
+		await page.waitForTimeout(250);
+	}
+
+	throw new Error(
+		`no pair of lists to move "${items.join('", "')}" between is on ` +
+			`this screen`
+	);
+}
+
+/**
+ * Reload the page, as "Refresh the browser window" asks.
+ */
+async function reloadAction(page: Page) {
+	await page.reload({waitUntil: 'load'});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Press a key some number of times, as "hit the Tab key twice" asks.
+ *
+ * Checked by focus moving. The Accessibility Menu's entry point is a button
+ * that exists only for keyboard users - it appears when Tab reaches it - so a
+ * lesson reaches it with keys, and a Tab that moved focus nowhere means the
+ * page never offered it.
+ */
+async function pressKeysAction(page: Page, key: string, times = 1) {
+	const focused = () =>
+		page.evaluate(() => {
+			const active = document.activeElement;
+
+			return active ? active.outerHTML.slice(0, 200) : '';
+		});
+
+	const before = await focused();
+
+	for (let index = 0; index < times; index++) {
+		await page.keyboard.press(key);
+
+		await page.waitForTimeout(250);
+	}
+
+	if (key === 'Tab') {
+		expect(
+			await focused(),
+			`pressing Tab ${times} time(s) moved focus nowhere`
+		).not.toBe(before);
+	}
+}
+
+/**
+ * Turn on some of the options in the open dialog, close it, and check the
+ * page changed, as "Enable some of the options, close the menu, and verify
+ * the changes on the page" asks.
+ *
+ * Two options, because "some" is not one. The Accessibility Menu's switches
+ * each add a class to the page body (liferay-portal's AccessibilitySettingsUtil
+ * names them, c-prefers-link-underline and the like), so the body's classes
+ * before and after are the change a reader would see.
+ */
+export async function enableSomeOptions(page: Page) {
+	//
+	// Only the menu's own classes. Comparing the whole class list could not
+	// fail: an open dialog adds modal-open to the body and closing it takes it
+	// away, so the list differed with nothing turned on at all.
+	//
+	const bodyClasses = () =>
+		page.evaluate(() =>
+			[...document.body.classList]
+				.filter((one) => one.startsWith('c-prefers'))
+				.sort()
+				.join(' ')
+		);
+
+	const before = await bodyClasses();
+
+	const dialog = page
+		.locator('.modal.show, .modal.d-block, [role="dialog"]')
+		.last();
+
+	await expect(dialog, 'no dialog is open to choose options in').toBeVisible({
+		timeout: FIND_TIMEOUT,
+	});
+
+	//
+	// Rendered after the dialog opens, so waited for; and addressed by
+	// position, because a selector for unchecked switches moves to the next
+	// one the moment the first is turned on. Clicked rather than checked: the
+	// switch updates after the click returns, and check() reads its state at
+	// once and reports that clicking changed nothing.
+	//
+	const switches = dialog.locator('[role="switch"], input[type="checkbox"]');
+
+	await expect(switches.first(), 'the open dialog offers no options').toBeVisible(
+		{timeout: FIND_TIMEOUT}
+	);
+
+	const unchecked: number[] = [];
+
+	for (let index = 0; index < (await switches.count()); index++) {
+		if (!(await switches.nth(index).isChecked())) {
+			unchecked.push(index);
+		}
+	}
+
+	if (unchecked.length < 2) {
+		throw new Error(
+			`the open dialog offers ${unchecked.length} option(s) to turn on, ` +
+				`not some`
+		);
+	}
+
+	for (const index of unchecked.slice(0, 2)) {
+		const option = switches.nth(index);
+
+		await option.click({timeout: 5000});
+
+		await expect(option, 'an option did not turn on').toBeChecked({
+			timeout: 5000,
+		});
+	}
+
+	await candidate(page, 'options turned on');
+
+	await closeModal(page);
+
+	const added = (await bodyClasses())
+		.split(' ')
+		.filter((one) => one && !before.split(' ').includes(one));
+
+	expect(
+		added.length,
+		`turning two options on added ${added.length} of the page classes ` +
+			`they apply (${added.join(', ') || 'none'})`
+	).toBeGreaterThanOrEqual(2);
+}
+
+/**
+ * Press a control that downloads a file, and check the file is real.
+ *
+ * Content Dashboard's Export XLS showed "XLS was successfully generated."
+ * while the server answered 500 and the browser saved an HTML redirect page
+ * under a .xls name. The toast changed the screen, so a plain press passed.
+ * The file is the effect the lesson promises, so the file is what is checked:
+ * it must exist, not be HTML, and carry the signature of its type - the export
+ * writes an Apache POI HSSFWorkbook, and every such .xls opens with the OLE2
+ * header D0 CF 11 E0.
+ */
+async function downloadAction(page: Page, label: string) {
+	const [file] = await Promise.all([
+		page.waitForEvent('download', {timeout: CHANGE_TIMEOUT * 3}),
+		press(page, label),
+	]);
+
+	const name = file.suggestedFilename();
+
+	const saved = await file.path();
+
+	const bytes = fs.readFileSync(saved);
+
+	if (!bytes.length) {
+		throw new Error(`"${label}" downloaded ${name}, and it is empty`);
+	}
+
+	if (bytes.subarray(0, 64).toString('latin1').trimStart().startsWith('<')) {
+		throw new Error(
+			`"${label}" downloaded ${name}, but it is an HTML page, not the ` +
+				`file the lesson promises - the server most likely failed ` +
+				`while the page reported success`
+		);
+	}
+
+	const signatures: Record<string, string> = {
+		docx: '504b0304',
+		xls: 'd0cf11e0',
+		xlsx: '504b0304',
+		zip: '504b0304',
+	};
+
+	const extension = path.extname(name).slice(1).toLowerCase();
+
+	const expected = signatures[extension];
+
+	if (expected && bytes.subarray(0, 4).toString('hex') !== expected) {
+		throw new Error(
+			`"${label}" downloaded ${name}, but it does not start like a ` +
+				`.${extension} file does`
+		);
+	}
+}
+
+/**
+ * Add a fragment, widget, or composition from the page editor's Components
+ * panel, as "drag and drop the *Container* fragment into the page's drop
+ * zone" asks.
+ *
+ * Found by the panel's search - "Search Fragments and Widgets" - because a
+ * lesson names the component, not the collection it is filed under. Placed
+ * the way liferay-portal's PageEditorPage.addFragment places one when no
+ * target is given: focus its "Add <name>" button and press Enter twice, the
+ * editor's own keyboard placement, rather than a mouse drag the editor's drop
+ * zones do not always register. Into a container, it is dragged onto the
+ * container the step names, as PageEditorPage does with a drop target.
+ * Checked by the editor saying it saved the change.
+ */
+async function addComponentAction(
+	page: Page,
+	name: string,
+	into: 'container' | 'page' = 'page'
+) {
+	const components = page.getByRole('tab', {exact: true, name: 'Components'});
+
+	if (
+		(await components.isVisible().catch(() => false)) &&
+		((await components.getAttribute('aria-selected')) !== 'true')
+	) {
+		await components.click({timeout: 5000});
+	}
+
+	//
+	// What is on the page now, to tell afterwards that something was added.
+	//
+	const fragments = page.locator('#page-editor .page-editor__topper');
+
+	const search = page.getByLabel('Search Fragments and Widgets');
+
+	await expect(
+		search,
+		'the page editor shows no Components panel to add from'
+	).toBeVisible({timeout: FIND_TIMEOUT});
+
+	//
+	// Counted once the editor has drawn the page. Counted on arrival it read
+	// zero on a page already holding a container, so "more afterwards" would
+	// have passed on the page merely finishing loading.
+	//
+	await page
+		.waitForLoadState('networkidle', {timeout: 5000})
+		.catch(() => undefined);
+
+	const before = await fragments.count().catch(() => 0);
+
+	await search.fill(name);
+
+	await page.waitForTimeout(SETTLE);
+
+	if (into === 'container') {
+		const item = page
+			.getByRole('menuitem')
+			.filter({hasText: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)})
+			.first();
+
+		const container = page
+			.locator('#page-editor .page-editor__container, #page-editor [data-name="Container"]')
+			.last();
+
+		await expect(
+			container,
+			`there is no container on the page to put ${name} into`
+		).toBeVisible({timeout: FIND_TIMEOUT});
+
+		await item.dragTo(container);
+	}
+	else {
+		const add = page.getByLabel(`Add ${name}`, {exact: true}).first();
+
+		await expect(
+			add,
+			`the Components panel offers nothing named "${name}" to add`
+		).toBeVisible({timeout: FIND_TIMEOUT});
+
+		await add.focus();
+
+		await page.keyboard.press('Enter');
+
+		await page.waitForTimeout(SETTLE / 2);
+
+		await page.keyboard.press('Enter');
+	}
+
+	//
+	// Added, then saved. The page gains a fragment, and the editor says it
+	// saved: "Saved as Draft" on current releases, "Changes have been saved"
+	// on 2026.q1 - which says it on load too, so on its own it proves nothing.
+	//
+	//
+	// The search emptied again. The lesson never asks the reader to search,
+	// and while it holds text the panel hides its Fragments and Widgets tabs -
+	// so the next step, "Go to the *Widgets* tab", found no tab.
+	//
+	await search.fill('').catch(() => undefined);
+
+	await expect
+		.poll(() => fragments.count().catch(() => 0), {
+			message: `${name} was not added to the page`,
+			timeout: CHANGE_TIMEOUT * 2,
+		})
+		.toBeGreaterThan(before);
+
+	await expect(
+		page
+			.getByLabel('Saved as Draft', {exact: true})
+			.or(page.getByText('Changes have been saved.', {exact: false}))
+			.first(),
+		`${name} was added, but the page editor did not save the change`
+	).toBeVisible({timeout: CHANGE_TIMEOUT * 2});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Select a fragment or widget in the page editor, by the name a lesson uses.
+ *
+ * Through the Browser tab's page structure, as liferay-portal's
+ * PageEditorPage.selectFragment falls back to: the tree shows Page Header,
+ * Page Body, and Page Footer collapsed, so every node is expanded first, and a
+ * node's data-qa-id is the fragment's own name - Menu Display, Search Results.
+ * "In the header" or "in the footer" limits the search to that part of the
+ * tree, since a master page carries Menu Display in both. Checked by the
+ * fragment's Options button appearing.
+ */
+async function selectInEditorAction(
+	page: Page,
+	name: string,
+	region?: 'body' | 'footer' | 'header'
+) {
+	await page.getByRole('tab', {exact: true, name: 'Browser'}).click({timeout: 5000});
+
+	for (let pass = 0; pass < 40; pass++) {
+		const collapsed = page
+			.locator('.page-editor__page-structure button.component-expander[aria-expanded="false"], [role="treeitem"] > .c-inner button.component-expander[aria-expanded="false"]')
+			.first();
+
+		if (!(await collapsed.isVisible().catch(() => false))) {
+			break;
+		}
+
+		await collapsed.click({timeout: 3000}).catch(() => undefined);
+
+		await page.waitForTimeout(200);
+	}
+
+	const nodes = page.locator('[role="treeitem"]');
+
+	const listed = await nodes.evaluateAll((all) =>
+		all.map((node) => ({
+			name: node.getAttribute('data-qa-id') || '',
+			text: ((node as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim(),
+			visible: (node as HTMLElement).offsetParent !== null,
+		}))
+	);
+
+	const boundary = (label: string) =>
+		listed.findIndex((node) => node.text.startsWith(label));
+
+	const regions = {
+		body: [boundary('Page Body'), boundary('Page Footer')],
+		footer: [boundary('Page Footer'), listed.length],
+		header: [boundary('Page Header'), boundary('Page Body')],
+	};
+
+	const [from, to] = region ? regions[region] : [0, listed.length];
+
+	const matches = listed
+		.map((node, index) => ({...node, index}))
+		.filter((node) => node.visible && (node.index >= Math.max(0, from)) &&
+			(node.index < (to < 0 ? listed.length : to)) &&
+			((node.name === name) || node.text.startsWith(name)));
+
+	if (!matches.length) {
+		throw new Error(
+			`the page structure has no ${name}` + (region ? ` in the ${region}` : '')
+		);
+	}
+
+	//
+	// The fragment's own name first, a label second. The Product Lists Page
+	// composition holds a container labelled Search Results above the Search
+	// Results widget; the label matched first, and the container's menu has
+	// no Configuration. Only the widget carries the name as its data-qa-id.
+	//
+	const target = matches.find((node) => node.name === name) || matches[0];
+
+	await nodes.nth(target.index).click({timeout: 5000});
+
+	await expect(
+		page.locator('.page-editor__topper__item').getByRole('button', {name: 'Options'}).first(),
+		`${name} was clicked in the page structure but is not selected`
+	).toBeVisible({timeout: FIND_TIMEOUT});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Choose from the selected fragment's own menu: "click *Actions* for the
+ * widget, and select *Configuration*". The lesson's Actions is the fragment
+ * toolbar's Options button, as liferay-portal's clickFragmentOption uses it.
+ */
+async function fragmentOptionAction(page: Page, option: string) {
+	const options = page
+		.locator('.page-editor__topper__item')
+		.getByRole('button', {name: 'Options'})
+		.first();
+
+	await options.click({timeout: 5000});
+
+	const item = page.locator('.dropdown-menu.show').getByText(option, {exact: true}).first();
+
+	await expect(item, `the fragment's menu offers no ${option}`).toBeVisible({
+		timeout: FIND_TIMEOUT,
+	});
+
+	await item.click({timeout: 5000});
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Go to a page through the Site Menu's page tree: "click *Page Tree*, expand
+ * *Products*, and select *Product List*". Every name but the last is a node to
+ * expand; the last is the page to open. Checked by the browser arriving on a
+ * page whose title carries its name - skipped, the step after it edited
+ * whatever page the browser was on.
+ */
+async function openFromPageTreeAction(page: Page, path: string[]) {
+	const menu = MENUS['Site Menu'];
+
+	if (!(await page.locator(menu.root).first().isVisible().catch(() => false))) {
+		await page.locator(menu.trigger).first().click({timeout: 5000});
+
+		await page.waitForTimeout(SETTLE);
+	}
+
+	//
+	// Only when the tree is not already showing. The Site Menu remembers the
+	// view it was left in, for the user, so on a second visit the tree is
+	// open and there is no Page Tree button to press.
+	//
+	if (!(await page.locator(menu.root).first().locator('[role="treeitem"]').first().isVisible().catch(() => false))) {
+		await page
+			.locator(menu.root)
+			.first()
+			.getByRole('button', {name: 'Page Tree'})
+			.or(page.locator(menu.root).first().getByRole('link', {name: 'Page Tree'}))
+			.first()
+			.click({timeout: 5000});
+	}
+
+	await page.waitForTimeout(SETTLE);
+
+	const node = (name: string) =>
+		page
+			.locator('[role="treeitem"]')
+			.filter({hasText: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)})
+			.first();
+
+	for (const parent of path.slice(0, -1)) {
+		const item = node(parent);
+
+		await expect(item, `the page tree has no ${parent}`).toBeVisible({timeout: FIND_TIMEOUT});
+
+		if ((await item.getAttribute('aria-expanded')) !== 'true') {
+			await item.locator('button').first().click({timeout: 5000}).catch(async () => {
+				await item.focus();
+
+				await page.keyboard.press('ArrowRight');
+			});
+		}
+
+		await page.waitForTimeout(SETTLE / 2);
+	}
+
+	const target = path[path.length - 1];
+
+	const leaf = node(target);
+
+	await expect(leaf, `the page tree has no ${target}`).toBeVisible({timeout: FIND_TIMEOUT});
+
+	await leaf.locator('a').first().or(leaf).first().click({timeout: 5000});
+
+	await expect
+		.poll(() => page.title(), {
+			message: `selecting ${target} in the page tree did not open it`,
+			timeout: CHANGE_TIMEOUT,
+		})
+		.toContain(target);
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Choose a value for a field, as a table row "Display Template | *Clarity
+ * Category Cards*" asks: from a native select, a dropdown, or a radio group.
+ * Checked by the field showing the value afterwards.
+ */
+async function chooseAction(page: Page, field: string, value: string) {
+	//
+	// Looked for until it appears (LESSONS.md, Rules Every Helper Keeps).
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (true) {
+	for (const exact of [true, false]) {
+		for (const scope of await scopesFor(page)) {
+			const select = scope.locator('select').and(scope.getByLabel(field, {exact})).first();
+
+			if (await select.isVisible().catch(() => false)) {
+				await select.selectOption({label: value}, {timeout: 5000});
+
+				await expect
+					.poll(() => select.evaluate((node) => {
+						const chosen = (node as HTMLSelectElement).selectedOptions[0];
+
+						return chosen ? chosen.text.trim() : '';
+					}), {message: `${field} does not show ${value}`, timeout: CHANGE_TIMEOUT})
+					.toBe(value);
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+
+			const combobox = scope.getByRole('combobox', {exact, name: field}).first();
+
+			if (await combobox.isVisible().catch(() => false)) {
+				await combobox.click({timeout: 5000});
+
+				await scope.getByRole('option', {exact: true, name: value}).first().click({timeout: 5000});
+
+				await expect(combobox, `${field} does not show ${value}`).toContainText(value, {timeout: CHANGE_TIMEOUT});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+
+			const radio = scope.getByRole('radio', {exact: true, name: value}).first();
+
+			if (await radio.isVisible().catch(() => false)) {
+				await radio.check({timeout: 5000});
+
+				await expect(radio, `${value} is not selected`).toBeChecked({timeout: CHANGE_TIMEOUT});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+		}
+	}
+
+	if (Date.now() >= deadline) {
+		break;
+	}
+
+	await page.waitForTimeout(300);
+	}
+
+	throw new Error(`no list, dropdown, or option named "${field}" offers ${value} on this screen`);
+}
+
+/**
+ * Wait for a reindex of all search indexes to finish.
+ *
+ * Execute starts it and returns at once; the index is built in the
+ * background. A reader waits without thinking about it - the setup lesson's
+ * last step is to take some time to explore the site - but a test goes
+ * straight on, and the first search-backed step of the course then races the
+ * reindex. Without the setup test at all, the Content Dashboard's Author
+ * picker said "No users were found" about a user who exists.
+ *
+ * The row shows a progress bar while it runs and its Reindex button again
+ * when it is done, which is how liferay-portal's SearchAdminPage.ts reads it.
+ */
+export async function waitForReindex(page: Page) {
+	const row = page
+		.locator('.index-actions-sheet .list-group-item')
+		.filter({hasText: 'All Search Indexes'})
+		.first();
+
+	//
+	// The bar must appear. Allowing it not to made this pass with no reindex
+	// at all, since the Reindex button it waits for is always there - and
+	// liferay-portal's SearchAdminPage.ts expects the bar after Execute too.
+	//
+	await expect(
+		row.locator('.progress'),
+		'Execute started no reindex: All Search Indexes shows no progress'
+	).toBeVisible({timeout: 15000});
+
+	await row
+		.locator('.progress')
+		.waitFor({state: 'hidden', timeout: 15 * 60 * 1000});
+
+	await expect(row.getByRole('button', {name: 'Reindex'})).toBeVisible({
+		timeout: CHANGE_TIMEOUT,
+	});
+}
+
+/**
+ * Close the dialog standing over the screen.
+ *
+ * A configuration dialog stays open after Save - the save happens inside it
+ * and it says so there - which is why a lesson writes "Click *Save* and close
+ * the modal window". Pressing only Save left the dialog over the page, and the
+ * next step found its control on the screen and could not click it.
+ *
+ * Closing is checked by the dialog going away. A dialog that closed itself is
+ * already what the lesson asks for, so there being none open is not a failure.
+ */
+async function closeModalAction(page: Page) {
+	//
+	// Looked for until it appears (LESSONS.md, Rules Every Helper Keeps).
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	while (true) {
+	for (const frame of [...page.frames()].reverse()) {
+		const dialog = frame
+			.locator('.modal.show, .modal.d-block, [role="dialog"]')
+			.last();
+
+		if (!(await dialog.isVisible().catch(() => false))) {
+			continue;
+		}
+
+		await dialog
+			.locator('button.close')
+			.or(dialog.getByRole('button', {exact: true, name: 'Close'}))
+			.first()
+			.click({timeout: 5000});
+
+		await dialog.waitFor({state: 'hidden', timeout: CHANGE_TIMEOUT});
+
+		await page.waitForTimeout(SETTLE);
+
+		return;
+	}
+
+	if (Date.now() >= deadline) {
+		break;
+	}
+
+	await page.waitForTimeout(300);
+	}
+
+	//
+	// Nothing open to close is a failure, not a pass: "close the modal" that
+	// found no modal had closed nothing, and the step reported done.
+	//
+	throw new Error('no dialog is open to close');
+}
+
+/**
+ * Give a form a file the exercise keeps in the workspace.
+ *
+ * A step like "Settings > Image | Path: `.../quality-sunglasses-01.jpeg`"
+ * needs a file off the reader's disk, and a browser cannot be clicked through
+ * the operating system's file chooser. Playwright does not have to be: it
+ * hands the file straight to the input, which is what setInputFiles is for.
+ *
+ * This matters beyond the one step. Liferay disables the fields that describe
+ * an image until an image is there, so the step after this one fails with a
+ * field that is present, correctly named, and not editable - which reads as a
+ * broken lesson rather than a missing file.
+ *
+ * The path is the one the lesson prints, resolved against the workspace root,
+ * because that is where the course keeps its exercise material.
+ */
+async function attachAction(page: Page, label: string, file: string) {
+	const relative = file.replace(/^.*?exercises\//, 'exercises/');
+
+	const candidates = [
+		path.resolve(process.cwd(), '..', relative),
+		path.resolve(process.cwd(), '..', file),
+	];
+
+	const found = candidates.find((candidate) => fs.existsSync(candidate));
+
+	expect(
+		found,
+		`the exercise file "${file}" is not in this workspace, so the step ` +
+			`that needs it cannot be performed`
+	).toBeTruthy();
+
+	//
+	// Twice: once for a form that takes the file directly, and once more
+	// after opening the picker for a form that does not.
+	//
+	// Liferay usually routes an image through Documents and Media rather than
+	// a plain file box, behind a control named for the field - "Select
+	// Image". The upload input lives inside that picker, so it is not on the
+	// screen until the picker is open.
+	//
+	for (let attempt = 0; attempt < 2; attempt++) {
+		//
+		// Waited for, not sampled. The picker is a modal in its own iframe
+		// and takes several seconds to arrive; asking once immediately after
+		// opening it finds the screen underneath and concludes nothing here
+		// takes a file.
+		//
+		//
+		// A generous budget on the second pass. The picker is Documents and
+		// Media in its own iframe, and on a freshly restored database it is
+		// being opened for the first time - measured at well over the
+		// ordinary find timeout, which is why this step passed when run on
+		// its own and failed in a suite that had just reset the instance.
+		//
+		//
+		// The first look waits too (LESSONS.md, Rules Every Helper Keeps): for
+		// the file field itself, or for the button that opens a picker, which
+		// ends it early. One look at a dialog still loading found neither.
+		//
+		const deadline = Date.now() + (attempt ? 45000 : FIND_TIMEOUT);
+
+		do {
+			for (const scope of await scopesFor(page)) {
+				const input = scope.locator('input[type="file"]').first();
+
+				if (await input.count().catch(() => 0)) {
+					await input.setInputFiles(found!);
+
+					await page.waitForTimeout(SETTLE * 3);
+
+					await confirmSelection(page);
+
+					return;
+				}
+			}
+
+			if (!attempt && (await page.locator(`[aria-label="Select ${label}"], [title="Select ${label}"]`).or(page.getByRole('button', {name: `Select ${label}`})).or(page.getByRole('button', {name: 'Select Image'})).count().catch(() => 0))) {
+				break;
+			}
+
+			if (Date.now() < deadline) {
+				await page.waitForTimeout(500);
+			}
+		}
+		while (Date.now() < deadline);
+
+		if (attempt) {
+			break;
+		}
+
+		const opener = page
+			.locator(
+				`[aria-label="Select ${label}"], [title="Select ${label}"]`
+			)
+			.or(page.getByRole('button', {name: `Select ${label}`}))
+			.or(page.getByRole('button', {name: 'Select Image'}))
+			.first();
+
+		if (!(await opener.count().catch(() => 0))) {
+			break;
+		}
+
+		await opener.click({timeout: 4000}).catch(() => undefined);
+
+		//
+		// Waited for the picker itself, so the polling below starts once
+		// there is something to poll.
+		//
+		await page
+			.locator('.modal.show, [role="dialog"], iframe')
+			.last()
+			.waitFor({state: 'visible', timeout: 20000})
+			.catch(() => undefined);
+
+		await page.waitForTimeout(SETTLE * 2);
+	}
+
+	//
+	// Said with what was actually there. "Nothing accepts a file" is true and
+	// useless; the screen it was looking at is what tells you whether the
+	// picker failed to open, opened somewhere unexpected, or opened fine and
+	// the upload control is named something else.
+	//
+	const saw = await page
+		.evaluate(() => {
+			const bits: string[] = [];
+
+			document
+				.querySelectorAll('.modal.show, [role="dialog"], iframe')
+				.forEach((node) => {
+					bits.push(
+						`${node.tagName}.${(node.className || '').toString().slice(0, 30)}`
+					);
+				});
+
+			return `${bits.join(' ')} | ${document.body.innerText
+				.replace(/\s+/g, ' ')
+				.slice(0, 120)}`;
+		})
+		.catch(() => 'the screen could not be read');
+
+	throw new Error(
+		`nothing on this screen accepts a file, so "${label}" could not be ` +
+			`given one. On screen: ${saw}`
+	);
+}
+
+/**
+ * Look at a page the way a reader who is not signed in would.
+ *
+ * A verification exercise says "log out and go to the page", and it means it:
+ * what Liferay renders into the head differs for an administrator, so
+ * checking while signed in checks the wrong document.
+ */
+export async function visitAsGuest(page: Page, address: string) {
+	await page.context().clearCookies();
+
+	await page.goto(address);
+
+	await page
+		.waitForLoadState('domcontentloaded', {timeout: 15000})
+		.catch(() => undefined);
+}
+
+/**
+ * Look at an address in a separate browser, then come back.
+ *
+ * "Open a new browser and go to <url>" is a side trip: the reader keeps their
+ * administrative session in the window they came from, and returns to it in
+ * the step after. Clearing cookies in place would end that session, so this
+ * opens a second browser context, visits, closes it, and leaves the original
+ * page exactly where it was.
+ *
+ * The redirects exercise depends on this precisely: the side trip is what
+ * produces the 404 entry, and the step after it acts on that entry from the
+ * administrative screen it never left.
+ */
+export async function visitInNewBrowser(page: Page, address: string) {
+	const browser = page.context().browser();
+
+	expect(browser, 'this test has no browser to open a second window in')
+		.not.toBeNull();
+
+	const context = await browser!.newContext();
+
+	try {
+		const other = await context.newPage();
+
+		await other.goto(address);
+
+		await other
+			.waitForLoadState('domcontentloaded', {timeout: 15000})
+			.catch(() => undefined);
+	}
+	finally {
+		await context.close();
+	}
+
+	//
+	// Back where the reader was, refreshed - which is what the step after a
+	// side trip always says to do.
+	//
+	await page.reload({timeout: 20000}).catch(() => undefined);
+
+	await page
+		.waitForLoadState('domcontentloaded', {timeout: 15000})
+		.catch(() => undefined);
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Check what the page renders into its head.
+ *
+ * This is the half of search engine optimisation a browser test is actually
+ * good at, and it was the half being skipped: the lesson asks the reader to
+ * open developer tools and look, which no page script can do, so every
+ * verification step was recorded as unperformable and the exercise checked
+ * nothing at all.
+ *
+ * Opening devtools is not the point. Seeing the tags is, and they can be read
+ * from the document directly - which is stricter than looking, because it
+ * fails when a tag is present but empty.
+ */
+export async function verifyHead(
+	page: Page,
+	kind: 'canonical' | 'meta' | 'openGraph' | 'title',
+	expected: Record<string, string> = {}
+) {
+	const selectors: Record<string, string> = {
+		canonical: 'link[rel="canonical"]',
+		meta: 'meta[name="description"], meta[name="keywords"]',
+		openGraph: 'meta[property^="og:"]',
+		title: 'title',
+	};
+
+	const found = await page.evaluate((selector) => {
+		return Array.from(document.head.querySelectorAll(selector)).map(
+			(node) =>
+				node.getAttribute('content') ||
+				node.getAttribute('href') ||
+				node.textContent ||
+				''
+		);
+	}, selectors[kind]);
+
+	expect(
+		found.length,
+		`the page renders no ${kind} tag, so the exercise's configuration did ` +
+			`not reach what readers and search engines see`
+	).toBeGreaterThan(0);
+
+	expect(
+		found.filter((value) => value.trim()).length,
+		`the page renders a ${kind} tag but it is empty`
+	).toBeGreaterThan(0);
+
+	//
+	// The values the course set, checked one by one. Presence alone proved
+	// nothing: Liferay renders a title, a canonical link, and og: tags on every
+	// page, configured or not, so this passed on a page whose English title was
+	// the Spanish one and which had no description at all. The title is matched
+	// by containment because Liferay appends the site and company names to it;
+	// every other tag must carry exactly the value the lesson gave.
+	//
+	for (const [selector, value] of Object.entries(expected)) {
+		const actual = await page.evaluate((one) => {
+			const node = document.head.querySelector(one);
+
+			if (!node) {
+				return null;
+			}
+
+			return (
+				node.getAttribute('content') ??
+				node.getAttribute('href') ??
+				node.textContent ??
+				''
+			);
+		}, selector);
+
+		expect(
+			actual,
+			`the page renders no ${selector}, which the course set to "${value}"`
+		).not.toBeNull();
+
+		//
+		// A link's address depends on the host the page is served under, so
+		// only its path is the course's: the canonical of the page it visited,
+		// the alternate of the Spanish friendly URL it set.
+		//
+		if (selector.startsWith('link')) {
+			expect(
+				actual!.trim(),
+				`${selector} does not point at the page the course set up`
+			).toMatch(new RegExp(`${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+		}
+		else if (selector === 'title') {
+			expect(
+				actual!.trim(),
+				`the page title does not carry the HTML Title the course set`
+			).toContain(value.trim());
+		}
+		else {
+			expect(
+				actual!.trim(),
+				`${selector} is not the value the course set`
+			).toBe(value.trim());
+		}
+	}
+}
+
+/**
+ * Go back to the course's own site.
+ *
+ * Several exercises do something in a global application - System Settings,
+ * the Control Panel - and then say "Return to Clarity Public Enterprise
+ * Website" before carrying on in the site's own menu. That step names no
+ * control because it is not one, so it was skipped, and every step after it
+ * ran against the global scope where the site's applications do not exist.
+ */
+export async function goHome(page: Page) {
+	await page.goto(HOME);
+
+	await page
+		.waitForLoadState('domcontentloaded', {timeout: 15000})
+		.catch(() => undefined);
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Reach a page's configuration, for an exercise that continues from another.
+ *
+ * A lesson splits a long procedure across exercises and resumes with "While
+ * configuring the Quality Sunglasses page, go to the Open Graph tab". A
+ * reader still has that screen open; a test does not, because each one starts
+ * in a fresh browser. Without this the exercise fails on its first step
+ * looking for a tab that is nowhere on the home page - which reads as a
+ * missing control rather than as a missing starting point.
+ *
+ * This is the route a reader takes to get back: the Pages application, the
+ * page's own Actions, then Configure.
+ */
+export async function openPageSettings(page: Page, name: string) {
+	await openPageAction(page, name, 'Configure');
+}
+
+/**
+ * Open a page in the editor, for a step that says to begin editing it.
+ *
+ * "Begin editing the Quality Sunglasses page and click Publish" was rendered
+ * as the Publish alone, so Publish was pressed from wherever the browser
+ * happened to be and the page stayed a draft. Everything the exercise then
+ * verifies is served from a URL that answers 404.
+ */
+export async function openPageEditor(page: Page, name: string) {
+	await openPageAction(page, name, 'Edit');
+}
+
+/** The Pages application, one page's own menu, and one action from it. */
+async function openPageAction(page: Page, name: string, action: string) {
+	await openMenu(page, 'Site Menu', 'Site Builder', 'Pages');
+
+	await press(page, 'Actions', name);
+
+	await press(page, action);
+}
+
+/**
+ * Drag one thing onto another, as a page-editor step describes.
+ *
+ * Playwright's dragTo() dispatches HTML5 drag events, which Liferay's page
+ * editor does not listen for - it tracks the pointer. So the pointer is what
+ * this moves, which is how liferay-portal's own page editor tests do it
+ * (modules/test/playwright/pages/layout-content-page-editor-web).
+ *
+ * Hovering the target at its centre matters: dropping on an edge lands the
+ * fragment in the neighbouring container, which looks like a passing step and
+ * builds the wrong page.
+ */
+export async function drag(page: Page, source: string, target: string) {
+	const from = await findDraggable(page, source);
+
+	expect(
+		from,
+		`nothing named "${source}" on this screen can be dragged`
+	).not.toBeNull();
+
+	const onto = await findDropTarget(page, target);
+
+	expect(
+		onto,
+		`there is nowhere named "${target}" on this screen to drop "${source}" into`
+	).not.toBeNull();
+
+	await from!.scrollIntoViewIfNeeded({timeout: 4000}).catch(() => undefined);
+
+	await from!.hover({timeout: 8000});
+
+	await page.mouse.down();
+
+	//
+	// Moved in steps rather than jumped. A single hover can land without the
+	// editor registering a drag at all, because it needs pointer movement to
+	// decide something is being dragged.
+	//
+	const box = await onto!.boundingBox();
+
+	if (box) {
+		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+			steps: 12,
+		});
+	}
+	else {
+		await onto!.hover({force: true, timeout: 8000});
+	}
+
+	await page.waitForTimeout(300);
+
+	await page.mouse.up();
+
+	await page.waitForTimeout(SETTLE);
+}
+
+/**
+ * Open a menu and click through to an application, as the step describes.
+ *
+ * Nothing is cached. The Site Menu lists the applications of the site the
+ * browser is in, and a course moves between sites and between users, so a
+ * menu read once is wrong for some steps however carefully it was read.
+ */
+async function openMenuAction(
+	page: Page,
+	menuName: string,
+	section: string | null,
+	application: string
+) {
+	//
+	// Tried again rather than given up on, which is what a reader does when a
+	// menu does not open.
+	//
+	// Measured: the first test run after the instance restarts fails on the
+	// Global Menu, and the same test passes when it runs eighth. The page
+	// renders before the menu it carries is usable, and no readiness check on
+	// the server side predicts it - so the recovery belongs here.
+	//
+	let failure: unknown;
+
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			await reachApplication(page, menuName, section, application);
+
+			return;
+		}
+		catch (error) {
+			failure = error;
+
+			await page.reload({timeout: 20000}).catch(() => undefined);
+
+			await page
+				.waitForLoadState('domcontentloaded', {timeout: 10000})
+				.catch(() => undefined);
+
+			await page.waitForTimeout(SETTLE);
+		}
+	}
+
+	throw failure;
+}
+
+async function reachApplication(
+	page: Page,
+	menuName: string,
+	section: string | null,
+	application: string
+) {
+	const menu = MENUS[menuName];
+
+	expect(menu, `there is no menu called "${menuName}"`).toBeTruthy();
+
+	const panel = page.locator(menu.root).first();
+
+	//
+	// Opened only when closed. The Product Menu toggle keeps its state on the
+	// server, so pressing it blindly closes a menu that was already open and
+	// the applications vanish.
+	//
+	//
+	// Confirmed open, and reopened if it is not.
+	//
+	// The toggle keeps its state on the server, so a stale state makes this
+	// skip the click and search a menu that is shut - which reported the menu
+	// as offering no such application. Intermittent, and it cost a test that
+	// had been passing.
+	//
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (await panel.isVisible().catch(() => false)) {
+			break;
+		}
+
+		await page
+			.locator(menu.trigger)
+			.first()
+			.click({timeout: 4000})
+			.catch(() => undefined);
+
+		await panel
+			.waitFor({state: 'visible', timeout: 4000})
+			.catch(() => undefined);
+	}
+
+	if (!(await panel.isVisible().catch(() => false))) {
+		await page.locator(menu.trigger).first().click();
+
+		await page.waitForTimeout(SETTLE);
+	}
+
+	//
+	// Back from the page tree. The Site Menu reopens in whatever view it was
+	// left in, for this user, and in the page tree view none of its sections
+	// are on the screen - only a Back to Menu button.
+	//
+	const back = panel.getByRole('button', {exact: true, name: 'Back to Menu'});
+
+	if (await back.isVisible().catch(() => false)) {
+		await back.click({timeout: 4000});
+
+		await page.waitForTimeout(SETTLE);
+	}
+
+	if (section) {
+		//
+		// A section of this menu is a tab button on 2026.q1 LTS and a link on
+		// 2026.q3, so both are named here. role=tab is listed first because
+		// it is the specific one.
+		//
+		const heading = page
+			.locator(
+				[
+					within(menu.root, `[role="tab"]:has-text("${section}")`),
+					within(menu.root, `button:has-text("${section}")`),
+					within(menu.root, `[role="button"]:has-text("${section}")`),
+					within(menu.root, `a:has-text("${section}")`),
+				].join(', ')
+			)
+			.first();
+
+		//
+		// A tab says it is current with aria-selected; a disclosure says it
+		// with aria-expanded. Either means there is nothing to click.
+		//
+		if (await heading.count()) {
+			const current =
+				(await heading.getAttribute('aria-expanded').catch(() => null)) ===
+					'true' ||
+				(await heading.getAttribute('aria-selected').catch(() => null)) ===
+					'true';
+
+			if (!current) {
+				//
+				// Allowed to fail. A section that will not take a click is
+				// not the end of the walk: the application's own link is
+				// often already in the panel, and looking is cheaper than
+				// giving up.
+				//
+				await heading
+					.click({timeout: 5000})
+					.catch(() => undefined);
+
+				await page.waitForTimeout(SETTLE);
+
+				//
+				// The tab's own contents have to arrive before the
+				// application inside it can be looked for.
+				//
+				await page
+					.locator(within(menu.root, `a:has-text("${application}")`))
+					.first()
+					.waitFor({state: 'attached', timeout: 8000})
+					.catch(() => undefined);
+			}
+		}
+	}
+
+	//
+	// When the lesson names no section, every tab is opened in turn until the
+	// application appears. A menu's applications are split across tabs -
+	// User Groups lives under Control Panel - so a phrasing like "the User
+	// Groups application in the Global Menu", which never states a tab, finds
+	// nothing while standing on the tab that happened to be showing.
+	//
+	//
+	// Looked for where the menu is already standing, before going anywhere.
+	//
+	// Some applications are on the menu's own first screen - a site is, and
+	// "Open the Global Menu and select Clarity Public Enterprise Website"
+	// names one. Walking the sections first navigated away from the panel
+	// holding exactly what was wanted.
+	//
+	if (
+		!section &&
+		!(await page
+			.locator(within(menu.root, `a:has-text("${application}")`))
+			.count()
+			.catch(() => 0))
+	) {
+
+		//
+		// Each section is tried in turn, reopening the menu before every one.
+		//
+		// Clicking a Global Menu section closes the dropdown, so walking the
+		// tabs in a single pass closes the menu on the first click and then
+		// searches a screen with no menu on it. The sections are read once
+		// while the panel is open, and the panel is reopened for each.
+		//
+		//
+		// A section of this menu is a link, not a tab.
+		//
+		// Read from a running instance rather than assumed: the Global Menu
+		// holds Applications, Commerce, CMS, Control Panel, and then the
+		// sites. Looking for [role="tab"] found nothing at all, so the walk
+		// had no sections to try and every unsectioned path failed.
+		//
+		// The two that hold administrative applications are tried first, so a
+		// site link - which navigates away - is only reached if neither had
+		// what the lesson named.
+		//
+		//
+		// Only the sections that hold applications are tried.
+		//
+		// The rest of this menu is a list of sites, and clicking one
+		// navigates into it: a walk that kept going ended up editing a
+		// fragment in the Global site, several screens from anything the
+		// lesson mentioned. Failing to find the application is a far better
+		// outcome than wandering off into unrelated administration.
+		//
+		const SECTIONS = ['Control Panel', 'Applications', 'Commerce'];
+
+		const found = (
+			await page
+				.locator(
+					[
+						within(menu.root, 'a'),
+						within(menu.root, '[role="tab"]'),
+						within(menu.root, '[role="button"][aria-expanded]'),
+					].join(', ')
+				)
+				.allInnerTexts()
+				.catch(() => [] as string[])
+		)
+			.map((name) => name.trim().split('\n')[0].trim())
+			.filter((name) => name && (name !== application));
+
+		const names = SECTIONS.filter((name) => found.includes(name));
+
+		for (const name of names) {
+			if (
+				await page
+					.locator(`a:text-is("${application}")`)
+					.count()
+					.catch(() => 0)
+			) {
+				break;
+			}
+
+			if (!(await panel.isVisible().catch(() => false))) {
+				await page
+					.locator(menu.trigger)
+					.first()
+					.click({timeout: 4000})
+					.catch(() => undefined);
+
+				await page.waitForTimeout(SETTLE);
+			}
+
+			//
+			// Matched by substring, as the explicit-section path already
+			// does. :text-is() compares raw text content, and these anchors
+			// carry nested text besides their name, so an exact comparison
+			// never matched and the click silently did nothing.
+			//
+			await page
+				.locator(
+					[
+						within(menu.root, `a:has-text("${name}")`),
+						within(menu.root, `[role="tab"]:has-text("${name}")`),
+						within(menu.root, `[role="button"]:has-text("${name}")`),
+					].join(', ')
+				)
+				.first()
+				.click({timeout: 4000})
+				.catch(() => undefined);
+
+			await page
+				.waitForLoadState('domcontentloaded', {timeout: 8000})
+				.catch(() => undefined);
+
+			//
+			// Waited for, not sampled. A section navigates to a new screen,
+			// and asking once whether the application is on it answers no
+			// while the screen is still arriving - so the walk moved on to
+			// the next section and eventually into a site.
+			//
+			await page
+				.locator(`a:text-is("${application}")`)
+				.first()
+				.waitFor({state: 'attached', timeout: 8000})
+				.catch(() => undefined);
+		}
+	}
+
+	//
+	// Searched on the page, not inside the panel. Clicking a Global Menu
+	// section closes the dropdown and renders that section's applications
+	// elsewhere, so a search confined to the panel finds nothing every time.
+	// The panel is still where the SECTION is found, because a section name
+	// like "Design" is a common word that appears in many places.
+	//
+	const link = page
+		.locator(`a:text-is("${application}")`)
+		.or(page.locator(within(menu.root, `a:has-text("${application}")`)))
+		.first();
+
+	await expect(
+		link,
+		`the ${menuName} on this screen offers no application named "${application}"`
+	).toHaveCount(1, {timeout: 8000});
+
+	//
+	// Checked, not assumed.
+	//
+	// Clicking an application link and walking away left several exercises
+	// running on the home page while reporting the menu step done, so every
+	// later step failed naming a control that was never going to be there.
+	// The retry above only helps if this says when it did not work.
+	//
+	const before = await screenPrint(page);
+
+	//
+	// Followed rather than clicked, where the link says where it goes.
+	//
+	// A menu entry in Liferay is an ordinary anchor with a real href, and
+	// going there directly avoids everything that makes clicking one
+	// unreliable: the panel closing under the pointer, an overlay catching
+	// the click, a handler that has not bound yet. liferay-portal's own tests
+	// navigate by URL for the same reason.
+	//
+	const href = await link.getAttribute('href').catch(() => null);
+
+	if (href && /^https?:|^\//.test(href)) {
+		await page.goto(href);
+	}
+	else {
+		await link.click();
+	}
+
+	//
+		// Bounded, and allowed to fail. Liferay polls in the background, so
+		// the network rarely goes quiet and an unbounded wait spends the
+		// default thirty seconds on every single step.
+		//
+		await page
+			.waitForLoadState('networkidle', {timeout: 4000})
+			.catch(() => undefined);
+
+	await page.waitForTimeout(SETTLE);
+
+	const arrived = Date.now() + CHANGE_TIMEOUT;
+
+	while (Date.now() < arrived) {
+		if ((await screenPrint(page)) !== before) {
+			return;
+		}
+
+		await page.waitForTimeout(250);
+	}
+
+	throw new Error(
+		`"${application}" was clicked in the ${menuName} and the screen did ` +
+			`not change, so the application did not open`
+	);
+}
+
+/**
+ * Press the control a step names.
+ *
+ * Visible text first, accessible name second. Liferay renders its create
+ * button as <a aria-label="Add Site">New</a>, and an aria-label REPLACES the
+ * accessible name - so asking by role for "New" finds nothing while the word
+ * New is printed on screen. A lesson writes what is printed.
+ *
+ * Cards count as controls: a template choice is a div carrying role="button"
+ * with its name in a span inside it.
+ *
+ * Every frame, because the button submitting a modal is inside the modal.
+ *
+ * And the screen has to change. Playwright clicks whatever it is given,
+ * including an inert span, and raises nothing - so "the click did not throw"
+ * is not the same as "the step was performed".
+ */
+//
+// What a lesson's icon image is called, where that differs from the icon the
+// product draws. A lesson writes "*Actions* (![](.../icon-actions.png))", and
+// the button it means carries a vertical ellipsis rather than anything named
+// actions.
+//
+const ICON_NAMES: Record<string, string> = {
+	actions: 'ellipsis-v',
+	'applications-menu': 'grid',
+	'product-menu': 'bars',
+};
+
+//
+// When the server last accepted a POST from this page, per page.
+//
+// A save inside a configuration dialog changes nothing a reader can see: the
+// dialog stays open, its text stays the same, and the page behind it is not
+// touched until the dialog closes. Comparing the screen called a save that
+// worked a click that did nothing. The server accepting the request is the
+// effect, and stronger evidence than any change on the screen.
+//
+const acceptedPosts = new WeakMap<Page, number>();
+
+//
+// When the page last started or finished a request, per page.
+//
+// The first click after a restart can take longer than the change timeout
+// to show anything, because the code behind what it opens is fetched then
+// for the first time. Reindex's confirmation took 225ms warm and outlasted
+// ten seconds cold, so the step failed with the dialog it was waiting for on
+// the screen. A screen that has not changed while the page is still
+// fetching is not yet evidence of anything.
+//
+const lastActivity = new WeakMap<Page, number>();
+
+function watchPosts(page: Page) {
+	if (acceptedPosts.has(page)) {
+		return;
+	}
+
+	acceptedPosts.set(page, 0);
+	lastActivity.set(page, Date.now());
+
+	const touch = () => lastActivity.set(page, Date.now());
+
+	page.on('request', touch);
+	page.on('requestfailed', touch);
+	page.on('requestfinished', touch);
+
+	page.on('response', (response) => {
+		if (
+			response.request().method() === 'POST' &&
+			response.status() < 400
+		) {
+			acceptedPosts.set(page, Date.now());
+		}
+	});
+}
+
+async function pressAction(
+	page: Page,
+	label: string,
+	within?: string,
+	icon?: string
+) {
+	//
+	// A navigation menu item's Actions is a button named "View <item>
+	// Options". "For the first About Us page item" picks among items of the
+	// same name by the ordinal - a menu can hold About Us twice.
+	//
+	if ((label === 'Actions') && within) {
+		const ordinals: Record<string, number> = {fifth: 4, first: 0, fourth: 3, second: 1, third: 2};
+		const found = within.match(/^(first|second|third|fourth|fifth)\s+(.+)$/i);
+		const index = found ? ordinals[found[1].toLowerCase()] : 0;
+		const item = found ? found[2] : within;
+
+		//
+		// Waited for: after Select, the menu editor draws its items a moment
+		// later, and one look found none and fell through to a search for a
+		// control named Actions, which does not exist.
+		//
+		const deadline = Date.now() + FIND_TIMEOUT;
+
+		while (Date.now() < deadline) {
+			for (const scope of await scopesFor(page)) {
+				//
+				// By its label, not its role: the button is hidden until the
+				// item is hovered, and getByRole leaves hidden elements out.
+				// A reader hovers the item first, so this does too.
+				//
+				const buttons = scope.locator(`button[aria-label="View ${item.replace(/"/g, '\\"')} Options"]`);
+
+				if ((await buttons.count().catch(() => 0)) > index) {
+					const button = buttons.nth(index);
+
+					await button
+						.locator('xpath=ancestor::*[contains(@class, "card") or contains(@class, "menu-item")][1]')
+						.hover({timeout: 5000})
+						.catch(() => undefined);
+
+					await button.click({timeout: 5000});
+
+					await page.waitForTimeout(SETTLE);
+
+					return;
+				}
+			}
+
+			await page.waitForTimeout(300);
+		}
+	}
+
+	watchPosts(page);
+
+	//
+	// When the named control was clicked. A POST accepted after it is the
+	// click's own; one accepted before it belongs to an earlier step.
+	//
+	let clickedAt = Number.POSITIVE_INFINITY;
+
+	const before = await screenPrint(page);
+
+	const escaped = label.replace(/"/g, '\\"');
+
+	//
+	// The row, card, or item the lesson named.
+	//
+	// "Click *Actions* for Christian Carter" names one row of a table where
+	// every row has an Actions control. Dropping the qualifier and taking the
+	// first match acted on whoever happened to be at the top - and because
+	// something did open, every check downstream agreed it had worked. This
+	// is the one defect class that produces a confidently wrong result rather
+	// than a failure.
+	//
+	const inside = within ? within.replace(/"/g, '\\"') : null;
+
+	//
+	// page.frames() already includes the main frame, so listing the page
+	// alongside it tried everything twice and doubled the time a miss costs.
+	//
+	//
+	// Searched until it appears, not once.
+	//
+	// A control is queried the moment the previous step's screen changed,
+	// which is before Liferay has finished rendering the one that replaced
+	// it. locator.count() does not wait, so a control that arrives 300ms
+	// later was reported as absent and the test blamed the lesson.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	let ambiguous = 0;
+
+	let seen = false;
+
+	while (Date.now() < deadline) {
+	for (const frame of await scopesFor(page)) {
+		//
+		// Narrowed to the named row where one exists, and left alone where it
+		// does not. A qualifier is not always a table row: "Reindex for All
+		// Search Indexes" names a control in a panel, and refusing to act
+		// because no <tr> carried that text broke a step that had been
+		// working. The ambiguity check below is what guards the wrong click,
+		// so falling back here costs nothing.
+		//
+		let scope: Locator | Frame = frame;
+
+		if (inside) {
+			//
+			// The smallest thing on the screen that carries the name.
+			//
+			// A qualifier is not always a table row. "the Language button for
+			// Name" names a field, and a field's own group is what holds both
+			// the label and the button - so .form-group is tried before the
+			// wider containers. Taking the last match takes the innermost,
+			// because containers nest.
+			//
+			const container = frame
+				.locator(
+					`.form-group:has-text("${inside}"), ` +
+						`fieldset:has-text("${inside}"), ` +
+						`tr:has-text("${inside}"), [role="row"]:has-text("${inside}"), ` +
+						`li:has-text("${inside}"), .list-group-item:has-text("${inside}"), ` +
+						`.card:has-text("${inside}")`
+				)
+				.last();
+
+			if (await container.count().catch(() => 0)) {
+				scope = container;
+			}
+		}
+
+		//
+		// Exact text first, substring only as a fallback.
+		//
+		// :has-text() is a case-insensitive SUBSTRING that also matches
+		// ancestors, and getByRole({exact: false}) is substring too. So
+		// press('New') matched Newsletter and News, press('Add') matched
+		// Address, press('ID') matched Video and Hidden - and the only guard,
+		// that the screen changed, is satisfied by any of them. The corpus
+		// uses labels this short: ID, HR, H2, Ok, link, Text, Page, Home.
+		//
+		// An exact match is what a lesson means when it prints a label.
+		//
+		//
+		// Ordered by how precisely each identifies a control, and a pass that
+		// matches more than one is refused rather than resolved with first().
+		//
+		// The accessible name comes first because the visible text does not
+		// identify a control on its own: the Add User screen carries three
+		// buttons reading "Select" - one for the image, one named "Select
+		// Topic", one named "Select Tags". Taking the first match clicked the
+		// wrong one, opened something, and the screen-changed check called
+		// that success. A wrong click that passes is worse than a miss.
+		//
+		//
+		// Every name this control might answer to: the one the lesson used,
+		// then the ones the product uses for the same thing.
+		//
+		const names = [label, ...(LABEL_ALIASES[label] || [])];
+
+		let byName = scope.getByRole('button', {exact: true, name: label});
+
+		for (const name of names) {
+			byName = byName
+				.or(scope.getByRole('button', {exact: true, name}))
+				.or(scope.getByRole('link', {exact: true, name}))
+				.or(scope.getByRole('menuitem', {exact: true, name}))
+				.or(scope.locator(`[aria-label="${name.replace(/"/g, '\\"')}"]`))
+				.or(scope.locator(`[title="${name.replace(/"/g, '\\"')}"]`));
+		}
+
+		const candidates = [
+			byName,
+			scope.locator(
+				`a:text-is("${escaped}"), button:text-is("${escaped}"), ` +
+					`[role="menuitem"]:text-is("${escaped}"), ` +
+					`[role="tab"]:text-is("${escaped}"), ` +
+					`[role="button"]:text-is("${escaped}")`
+			),
+			//
+			// A section of a page's configuration is a plain list item, not a
+			// button, a tab, or a link - the SEO, Open Graph and Custom Meta
+			// Tags sections are `.portlet-body li` in portal's own page
+			// object. Nothing above could ever have matched one.
+			//
+			scope.locator(
+				`.portlet-body li:text-is("${escaped}"), ` +
+					`nav li:text-is("${escaped}"), ` +
+					`[role="tablist"] li:text-is("${escaped}")`
+			),
+			//
+			// An entry in an item selector. The web content picker lists each
+			// article as a row holding a paragraph with its title and nothing
+			// with a role or a name, so "select the Cookie Policy article"
+			// found no control. The nearest row around the exact title is the
+			// entry, as with an unlabelled checkbox's row in toggle().
+			//
+			//
+			// Never a container holding a checkbox, and never a card. In the
+			// Select Author table, wrapped in a card, "the nearest row around
+			// Walter Douglas" was the card around the whole table: the click
+			// landed on whatever sat at its centre, and his box stayed empty.
+			// A row with a box is the row-checkbox search's to handle, below.
+			//
+			scope
+				.getByText(label, {exact: true})
+				.locator(
+					'xpath=ancestor::*[self::dd or @data-value or contains(concat(" ", normalize-space(@class), " "), " list-group-item ")][1][not(.//input[@type="checkbox"])]'
+				),
+			scope
+				.getByRole('button', {exact: false, name: label})
+				.or(scope.getByRole('link', {exact: false, name: label}))
+				.or(
+					scope.locator(
+						`a:has-text("${escaped}"), button:has-text("${escaped}"), ` +
+							`[role="menuitem"]:has-text("${escaped}"), ` +
+							`[role="tab"]:has-text("${escaped}"), ` +
+							`[role="button"]:has-text("${escaped}")`
+					)
+				),
+			//
+			// The same name in other capitals, last and only where it is the
+			// one match. The Pages course lists "Terms of use"; the article is
+			// "Terms of Use", and a reader does not stop at a capital letter.
+			//
+			scope
+				.getByText(new RegExp(`^\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'))
+				.locator(
+					'xpath=ancestor-or-self::*[self::button or self::a or @role="button" or @role="menuitem" or self::dd or @data-value or contains(concat(" ", normalize-space(@class), " "), " list-group-item ")][1][not(.//input[@type="checkbox"])]'
+				),
+		];
+
+		//
+		// A control the reader operates rather than clicks.
+		//
+		// press() knew links, buttons, tabs and menu items only, so a
+		// checkbox, radio, switch, or option of a select could not be reached
+		// at all - and a lesson step naming one was reported as naming a
+		// control that is not on the screen. Selecting a person from a picker
+		// and choosing a redirect type are both this.
+		//
+		const toggle = scope
+			.getByRole('checkbox', {exact: true, name: label})
+			.or(scope.getByRole('radio', {exact: true, name: label}))
+			.or(scope.getByRole('switch', {exact: true, name: label}));
+
+		if ((await toggle.count().catch(() => 0)) === 1) {
+			seen = true;
+
+			try {
+				await toggle.first().check({timeout: 4000});
+
+				return;
+			}
+			catch (error) {
+				// Fall through to the controls below.
+			}
+		}
+
+		const chooser = scope
+			.locator('select')
+			.filter({has: scope.locator(`option:text-is("${escaped}")`)});
+
+		if ((await chooser.count().catch(() => 0)) === 1) {
+			seen = true;
+
+			try {
+				await chooser.first().selectOption({label});
+
+				return;
+			}
+			catch (error) {
+				// Fall through to the controls below.
+			}
+		}
+
+		//
+		// Counted among what the reader can actually see.
+		//
+		// Liferay keeps a dropdown in the DOM for every row of a table, so
+		// "Impersonate User" matched eleven controls when exactly one menu
+		// was open. Counting hidden copies made an unambiguous screen look
+		// ambiguous and stopped a step that a reader performs without
+		// hesitating.
+		//
+		let control: Locator | null = null;
+
+		for (const candidate of candidates) {
+			const shown: Locator[] = [];
+
+			for (const element of await candidate.all().catch(() => [])) {
+				if (await element.isVisible().catch(() => false)) {
+					shown.push(element);
+				}
+			}
+
+			if (shown.length === 1) {
+				control = shown[0];
+
+				break;
+			}
+
+			if (shown.length > 1) {
+				ambiguous = shown.length;
+			}
+		}
+
+		if (!control) {
+			//
+				// "Select Christian Carter" in a picker means tick the box in his
+			// row. The box carries no name of its own - the name is in a cell
+			// beside it - so no search by label can reach it, and the step read
+			// as naming a control the screen does not have.
+			//
+			const rowBox = scope
+				.locator(
+					`tr:has-text("${escaped}"), [role="row"]:has-text("${escaped}"), ` +
+						`li:has-text("${escaped}"), .list-group-item:has-text("${escaped}")`
+				)
+				.locator('input[type="checkbox"], [role="checkbox"]');
+
+			const rowBoxes: Locator[] = [];
+
+			for (const element of await rowBox.all().catch(() => [])) {
+				if (await element.isVisible().catch(() => false)) {
+					rowBoxes.push(element);
+				}
+			}
+
+			if (rowBoxes.length === 1) {
+				seen = true;
+
+				try {
+					await rowBoxes[0].check({timeout: 4000});
+
+					return;
+				}
+				catch (error) {
+					// Fall through to the controls below.
+				}
+			}
+			continue;
+		}
+
+		//
+		// A click that throws moves on to the next candidate rather than
+		// being swallowed. Swallowing it left the screen unchanged and the
+		// check below then blamed the control for not opening anything, when
+		// the truth was that nothing had been clicked at all.
+		//
+		//
+		// A matching control existed. Recorded before the click so that a
+		// control which is present but unclickable is reported as exactly
+		// that, rather than as absent - the two need opposite fixes, and
+		// reporting both as "no control reading X" sent every one of them to
+		// be investigated as a wrong label in the lesson.
+		//
+		seen = true;
+
+		try {
+			await control.scrollIntoViewIfNeeded({timeout: 2000});
+		}
+		catch (error) {
+			// Not fatal: a control already in view needs no scrolling.
+		}
+
+		try {
+			//
+			// Bounded. A miss must be cheap: the default wait is thirty
+			// seconds, and a handful of those exhausts the whole test's
+			// budget before it reaches the step that matters.
+			//
+			clickedAt = Date.now();
+
+			await control.click({timeout: 4000});
+		}
+		catch (error) {
+			//
+			// A menu left standing over the control is the usual reason a
+			// click cannot land. Opening the Site Menu to reach an
+			// application leaves its panel covering the screen the
+			// application rendered, so the very next step is blocked by the
+			// menu that got it there.
+			//
+			// Closing it is what a reader does without noticing, and it is
+			// done only after a click has actually failed - pressing Escape
+			// at every step would shut the form the previous step opened.
+			//
+			if (!(await closeOpenMenus(page))) {
+				continue;
+			}
+
+			try {
+				await control.click({timeout: 4000});
+			}
+			catch (again) {
+				continue;
+			}
+		}
+
+		//
+		// Bounded, and allowed to fail. Liferay polls in the background, so
+		// the network rarely goes quiet and an unbounded wait spends the
+		// default thirty seconds on every single step.
+		//
+		await page
+			.waitForLoadState('networkidle', {timeout: 4000})
+			.catch(() => undefined);
+
+		//
+		// Polled until the screen differs, rather than read once after a
+		// fixed wait.
+		//
+		// Liferay navigates and renders in its own time, and a single reading
+		// called a working click a failure: pressing New on Users and
+		// Organizations opens Add User, and the check read the screen before
+		// Add User had arrived. A change is proof as soon as it appears; the
+		// absence of one is only proof once the waiting is done.
+		//
+		const deadline = Date.now() + CHANGE_TIMEOUT;
+
+		//
+		// Past the deadline only while the page is still fetching, and never
+		// past three times it. Liferay polls in the background, so a page
+		// that is never quiet waits the full limit - which only a step that
+		// is already failing pays.
+		//
+		const limit = Date.now() + CHANGE_TIMEOUT * 3;
+
+		let after = before;
+
+		while (true) {
+			after = await screenPrint(page);
+
+			if (after !== before) {
+				break;
+			}
+
+			const now = Date.now();
+
+			if (
+				now >= limit ||
+				(now >= deadline &&
+					now - (lastActivity.get(page) || 0) > 1500)
+			) {
+				break;
+			}
+
+			await page.waitForTimeout(250);
+		}
+
+		//
+		// A control that became selected counts as having worked, even where
+		// the screen reads the same.
+		//
+		// Pressing a tab swaps one panel for another, and the two often carry
+		// almost identical text - so comparing what the screen says reported
+		// a working click as a click that did nothing. What the control says
+		// about itself is the better evidence here.
+		//
+		//
+		// Bounded. A control the click removed - a menu item, a dialog's
+		// button - cannot answer, and an unbounded read waited out the whole
+		// action timeout for it: fifteen seconds after every Select.
+		//
+		const selected = await control
+			.evaluate(
+				(node) =>
+					node.getAttribute('aria-selected') === 'true' ||
+					node.getAttribute('aria-expanded') === 'true' ||
+					node.classList.contains('active'),
+				undefined,
+				{timeout: 1000}
+			)
+			.catch(() => false);
+
+		const saved = (acceptedPosts.get(page) || 0) >= clickedAt;
+
+		if (!selected && !saved) {
+			expect(
+				after,
+				`"${label}" was pressed and nothing on the screen changed, so ` +
+					`whatever it was meant to open did not open`
+			).not.toBe(before);
+		}
+
+		//
+		// A tab is open when its panel is shown and has something in it, not
+		// when it is marked selected. Page Audit's PageSpeed Insights tab is
+		// selected at once, and its pane fades in afterwards - so the capture
+		// showed an empty panel and the step passed. Reading the pane's text
+		// was not enough either: a hidden pane still reports all of it, which
+		// made the first version of this check pass before the pane appeared.
+		// The panel is the one the tab names in aria-controls, or else the
+		// visible tab panel, and it must be rendered and fully shown.
+		//
+		if (selected && ((await control.getAttribute('role').catch(() => null)) === 'tab')) {
+			await expect
+				.poll(
+					() =>
+						control
+							.evaluate((node) => {
+								const id = node.getAttribute('aria-controls');
+
+								if (id && !node.ownerDocument.getElementById(id)) {
+									return 0;
+								}
+
+								const panel = ((id &&
+									node.ownerDocument.getElementById(id)) ||
+									[
+										...node.ownerDocument.querySelectorAll(
+											'[role="tabpanel"]'
+										),
+									].find(
+										(one) =>
+											(one as HTMLElement).offsetParent !==
+											null
+									)) as HTMLElement | undefined;
+
+								if (!panel) {
+									return -1;
+								}
+
+								const shown =
+									panel.offsetParent !== null &&
+									getComputedStyle(panel).opacity === '1' &&
+									(!panel.classList.contains('fade') ||
+										panel.classList.contains('show'));
+
+								return shown ? panel.innerText.trim().length : 0;
+							})
+							.catch(() => 0),
+					{
+						message: `the "${label}" tab opened but its panel stayed empty`,
+						timeout: CHANGE_TIMEOUT,
+					}
+				)
+				//
+				// No panel at all (-1) is accepted only where the screen
+				// changed: a tab that navigates has no panel to show, but a
+				// tab whose pane cannot be found and that changed nothing has
+				// not been shown to have opened.
+				//
+				.toBeGreaterThan(after === before ? 0 : -2);
+		}
+
+		return;
+	}
+
+		await page.waitForTimeout(250);
+	}
+
+	//
+	// The icon the lesson drew, when nothing answers to the name.
+	//
+	// Some controls carry no text and no aria-label at all - the cog that
+	// configures a chart is one - so no search by name can reach them, and
+	// the step reads as naming a control the product does not have. The
+	// lesson does identify it though: it prints the icon beside the name, and
+	// that icon's file name is the icon the product draws.
+	//
+	if (icon) {
+		const drawn = ICON_NAMES[icon] || icon;
+
+		//
+		// Scoped the same way a named control is.
+		//
+		// An icon is a far weaker identifier than a name - a cog appears in
+		// several places on one screen - so searching the whole page for one
+		// and clicking the first match is how a step meant for a chart's
+		// settings reached something else entirely, and the tests after it
+		// found themselves signed out. Where the sentence named a row, the
+		// icon is looked for only inside it.
+		//
+		for (const frame of await scopesFor(page)) {
+			const scope: Locator | Frame = inside
+				? ((await (frame as Frame)
+						.locator?.(
+							`.form-group:has-text("${inside}"), ` +
+								`tr:has-text("${inside}"), ` +
+								`[role="row"]:has-text("${inside}"), ` +
+								`li:has-text("${inside}"), ` +
+								`.card:has-text("${inside}"), ` +
+								`section:has-text("${inside}")`
+						)
+						.last()
+						.count()
+						.catch(() => 0))
+					? (frame as Frame)
+							.locator(
+								`.form-group:has-text("${inside}"), ` +
+									`tr:has-text("${inside}"), ` +
+									`[role="row"]:has-text("${inside}"), ` +
+									`li:has-text("${inside}"), ` +
+									`.card:has-text("${inside}"), ` +
+									`section:has-text("${inside}")`
+							)
+							.last()
+					: frame)
+				: frame;
+
+			const control = scope
+				.locator(
+					`button:has(svg use[href$="#${drawn}"]), ` +
+						`[role="button"]:has(svg use[href$="#${drawn}"])`
+				)
+				.first();
+
+			if (
+				(await control.count().catch(() => 0)) &&
+				(await control.isVisible().catch(() => false))
+			) {
+				await control.click({timeout: 5000});
+
+				await page.waitForTimeout(SETTLE);
+
+				return;
+			}
+		}
+	}
+
+	if (ambiguous && !seen) {
+		throw new Error(
+			`"${label}" matches ${ambiguous} controls on this screen, so which ` +
+				`one the step means cannot be told from the label alone - the ` +
+				`lesson needs to say which, as in "Select for the image"`
+		);
+	}
+
+	throw new Error(
+		seen
+			? `"${label}" is on this screen but could not be clicked - it may ` +
+				`be covered, disabled, or outside the visible area`
+			: `no control reading or announcing "${label}" is on this screen`
+	);
+}
+
+async function findDraggable(
+	page: Page,
+	name: string
+): Promise<Locator | null> {
+	const escaped = name.replace(/"/g, '\\"');
+
+	for (const frame of page.frames()) {
+		const candidate = frame
+			.locator(
+				`[draggable="true"]:has-text("${escaped}"), ` +
+					`.page-editor__sidebar__fragment-card:has-text("${escaped}"), ` +
+					`li:has-text("${escaped}")`
+			)
+			.first();
+
+		if (await candidate.count().catch(() => 0)) {
+			return candidate;
+		}
+	}
+
+	return null;
+}
+
+async function findDropTarget(
+	page: Page,
+	name: string
+): Promise<Locator | null> {
+	const escaped = name.replace(/"/g, '\\"');
+
+	for (const frame of page.frames()) {
+		const candidate = frame
+			.locator(
+				`[class*="drop"]:has-text("${escaped}"), ` +
+					`[class*="container"]:has-text("${escaped}"), ` +
+					`[aria-label*="${escaped}"]`
+			)
+			.last()
+			.or(frame.getByText(name, {exact: false}).last())
+			.first();
+
+		if (await candidate.count().catch(() => 0)) {
+			return candidate;
+		}
+	}
+
+	return null;
+}
+
+async function findField(page: Page, field: string): Promise<Locator | null> {
+	//
+	// Constrained to something that can actually hold text. Without this the
+	// substring pass below returned labels and wrapper elements, and the fill
+	// failed with "Element is not an <input>" while naming the right field.
+	//
+	//
+	// Only what takes typing. "Name" loosely also names the box labelled "Use
+	// Custom Name", and fill() on a checkbox throws - or, had it been a text
+	// field of the same name, would have typed into the wrong one.
+	//
+	const FILLABLE =
+		'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]), ' +
+		'textarea, select, [contenteditable="true"]';
+
+	const quoted = field.replace(/"/g, '');
+
+	//
+	// Three passes, in order of how much they prove.
+	//
+	// 1. The accessible name, exactly. getByLabel({exact: false}) is a
+	//    case-insensitive substring, so fill(page, 'name', ...) matched
+	//    Username, Display Name, Template Name and Friendly URL Name - and
+	//    then read that same wrong field back, so the verification agreed
+	//    with itself.
+	//
+	// 2. The visible label. Liferay names some controls after their helper
+	//    text rather than their label: the Description box on a user group
+	//    announces itself as "Characters Maximum: 4000", so a reader looking
+	//    at a field clearly labelled Description cannot be matched by name at
+	//    all. The label is what the lesson saw, so the label is what this
+	//    follows - to the first field after it in the document.
+	//
+	// 3. The accessible name as a substring, which is the old behaviour and
+	//    the least trustworthy.
+	//
+	//
+	// Retried for the same reason press() is: a form is queried as soon as
+	// the screen carrying it changed, which is before its fields exist.
+	//
+	const deadline = Date.now() + FIND_TIMEOUT;
+
+	//
+	// A looser pass that finds something is trusted only after the exact
+	// pass has looked again. A dialog that loads between the two passes of
+	// one round was searched exactly while empty and loosely once full, so
+	// the loose match won over the exact one sitting beside it.
+	//
+	let looseFound = false;
+
+	while (Date.now() < deadline) {
+	rounds:
+	for (const pass of ['exact', 'label', 'loose']) {
+		for (const frame of await scopesFor(page)) {
+			let candidate: Locator;
+
+			if (pass === 'label') {
+				candidate = frame
+					.locator(
+						`xpath=//label[normalize-space(translate(normalize-space(.), "*", "")) = "${quoted}"]` +
+							`/following::*[self::input or self::textarea or self::select][1]`
+					)
+					.first();
+			}
+			else {
+				const exact = pass === 'exact';
+
+				candidate = frame
+					.getByLabel(field, {exact})
+					.or(frame.getByPlaceholder(field, {exact}))
+					.and(frame.locator(FILLABLE))
+					.first();
+			}
+
+			if (await candidate.count().catch(() => 0)) {
+				if ((pass === 'exact') || looseFound) {
+					return candidate;
+				}
+
+				looseFound = true;
+
+				break rounds;
+			}
+		}
+	}
+
+		if (!looseFound) {
+			await page.waitForTimeout(250);
+		}
+	}
+
+	return null;
+}
+
+/**
+ * A descendant selector applied to each alternative of a menu's root.
+ *
+ * `root` lists several class names because the menu is a dropdown on one
+ * release and a modal on another. Writing `${root} button` produces
+ * ".a button, .b, .c" - the comma ends the first selector, so every
+ * alternative after the first matches the container itself rather than the
+ * button inside it. Menu queries were silently matching the panel.
+ */
+function within(root: string, suffix: string): string {
+	return root
+		.split(',')
+		.map((one) => `${one.trim()} ${suffix}`)
+		.join(', ');
+}
+
+/** Close any menu panel standing over the screen. True if one was closed. */
+async function closeOpenMenus(page: Page): Promise<boolean> {
+	let closed = false;
+
+	for (const menu of Object.values(MENUS)) {
+		const panel = page.locator(menu.root).first();
+
+		if (!(await panel.isVisible().catch(() => false))) {
+			continue;
+		}
+
+		await page
+			.locator(menu.trigger)
+			.first()
+			.click({timeout: 3000})
+			.catch(() => undefined);
+
+		await panel
+			.waitFor({state: 'hidden', timeout: 3000})
+			.catch(() => undefined);
+
+		closed = true;
+	}
+
+	return closed;
+}
+
+/**
+ * Where to look for a control, nearest the reader first.
+ *
+ * Liferay opens its create forms in a modal, and that modal is an iframe -
+ * so the name box a step means is in the newest frame, while the page behind
+ * it still has a search box that also answers to "Name". Searching the main
+ * frame first typed the page's name into the filter behind the dialog,
+ * pressed Add on a form nothing had filled, and reported the step done. The
+ * exercise then finished green having created nothing.
+ *
+ * Frames are returned newest first because a modal's frame is added last, and
+ * where a modal is open in a frame, that modal is returned ahead of the frame
+ * that holds it. A reader cannot touch what is behind a dialog either.
+ */
+//
+// Native dialogs - alert, confirm, prompt, beforeunload - answered as a reader
+// answers them, and never silently.
+//
+// Playwright dismisses them by default. A reader facing "Are you sure?" after
+// clicking Delete clicks OK, because a lesson only ever goes forward; the
+// default cancelled the action instead, and the screen changed enough for the
+// step to pass. The lesson's wording cannot say which prompts are native:
+// "confirm" in a lesson means "check that" far more often than it means a
+// dialog. So every dialog is accepted, and each is recorded in the report as
+// an annotation with its message, where a reviewer sees it.
+//
+const dialogsWatched = new WeakSet<Page>();
+
+function watchDialogs(page: Page) {
+	if (dialogsWatched.has(page)) {
+		return;
+	}
+
+	dialogsWatched.add(page);
+
+	page.on('dialog', async (dialog) => {
+		const note = `${dialog.type()}: "${dialog.message().slice(0, 200)}"`;
+
+		try {
+			test.info().annotations.push({
+				description: `accepted as a reader would - ${note}`,
+				type: 'native dialog',
+			});
+		}
+		catch (error) {
+
+			// Outside a running test there is no report to write to.
+
+		}
+
+		console.log(`[native dialog] accepted ${note}`);
+
+		await dialog.accept().catch(() => undefined);
+	});
+}
+
+async function scopesFor(page: Page): Promise<Array<Locator | Frame>> {
+	watchDialogs(page);
+
+	const scopes: Array<Locator | Frame> = [];
+
+	for (const frame of [...page.frames()].reverse()) {
+		const dialog = frame
+			.locator('.modal.show, .modal.d-block, [role="dialog"]')
+			.last();
+
+		if (await dialog.isVisible().catch(() => false)) {
+			scopes.push(dialog);
+		}
+
+		scopes.push(frame);
+	}
+
+	return scopes;
+}
+
+/** Close a picker once it holds what was asked for. */
+async function confirmSelection(page: Page) {
+	for (const name of ['Select', 'Add', 'Done', 'Choose']) {
+		for (const scope of await scopesFor(page)) {
+			const button = scope
+				.getByRole('button', {exact: true, name})
+				.first();
+
+			if (
+				(await button.count().catch(() => 0)) &&
+				(await button.isVisible().catch(() => false))
+			) {
+				await button.click({timeout: 4000}).catch(() => undefined);
+
+				await page.waitForTimeout(SETTLE * 2);
+
+				return;
+			}
+		}
+	}
+}
+
+/** The address plus the shape of the visible text, as a cheap fingerprint. */
+async function screenPrint(page: Page): Promise<string> {
+	//
+	// Retried rather than swallowed. "Execution context was destroyed" is
+	// routine when a click starts a navigation, and answering '' for it made
+	// the fingerprint differ from any real one - so the check that a click
+	// changed the screen passed by construction exactly when the page was
+	// busiest.
+	//
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const shown = await page.evaluate(() => {
+				const text = document.body ? document.body.innerText : '';
+
+				return text.replace(/\s+/g, ' ').trim();
+			});
+
+			//
+			// Every dialog is a frame of its own. Choosing a library in the
+			// web content picker changes nothing outside the dialog, and a
+			// print of the main frame alone called that working click one
+			// that did nothing. A frame torn down mid-read is left out rather
+			// than failing the read.
+			//
+			const frames: string[] = [];
+
+			for (const frame of page.frames()) {
+				if (frame === page.mainFrame()) {
+					continue;
+				}
+
+				//
+				// Only a frame on screen. A hidden frame that polls would
+				// otherwise count as the click having done something.
+				//
+				const owner = await frame.frameElement().catch(() => null);
+
+				if (!owner || !(await owner.isVisible().catch(() => false))) {
+					continue;
+				}
+
+				const inside = await frame
+					.evaluate(() => (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').trim())
+					.catch(() => null);
+
+				if (inside !== null) {
+					frames.push(`${frame.url()}|${inside.length}|${inside.slice(0, 200)}`);
+				}
+			}
+
+			return `${page.url()}|${shown.length}|${shown.slice(0, 400)}|${frames.join('|')}`;
+		}
+		catch (error) {
+			await page.waitForTimeout(300);
+		}
+	}
+
+	//
+	// Still unreadable after three tries. Naming it is better than returning
+	// a value that would silently satisfy a comparison.
+	//
+	throw new Error('the screen could not be read to compare before and after');
+}
+
+/**
+ * Put a navigation menu's top-level items in the order a lesson lists.
+ *
+ * "Drag and drop the pages into this order" is done as a reader does it:
+ * each item dragged just below the item it should follow, which the menu
+ * editor saves at once. The order is then
+ * read back and compared, so a drag that did nothing fails the step instead
+ * of passing it.
+ */
+async function reorderMenuAction(page: Page, names: string[]) {
+	const items = page.locator('[role="menubar"] [role="menuitem"][data-nesting-level="0"]');
+
+	const current = async () =>
+		(await items.evaluateAll((all) => all.map((node) => node.getAttribute('aria-label') || '')))
+			.map((label) => label.replace(/^Open (.*) \([^)]+\) Configuration Panel$/, '$1'))
+			.filter((name) => names.includes(name));
+
+	const handle = (name: string) =>
+		page
+			.locator(`[role="menuitem"][data-nesting-level="0"][aria-label^="Open ${name.replace(/"/g, '\\"')} ("]`)
+			.locator('[draggable="true"]')
+			.first();
+
+	await expect(items.first(), 'the menu editor shows no items to reorder').toBeVisible({timeout: FIND_TIMEOUT});
+
+	for (let index = 0; index < names.length; index++) {
+		const now = await current();
+
+		if (!now.includes(names[index])) {
+			throw new Error(`the menu has no item named "${names[index]}" to move`);
+		}
+
+		if (now[index] === names[index]) {
+			continue;
+		}
+
+		//
+		// Onto the top edge of the first item, and otherwise onto the bottom
+		// edge of the item that should come before it. A drop on the top edge
+		// of any item but the first did nothing at all (probed on 2026.q1.1:
+		// FAQ onto Careers stayed put; FAQ onto the bottom of Blog moved).
+		//
+		if (index === 0) {
+			await handle(names[index]).dragTo(handle(now[0]), {targetPosition: {x: 20, y: 4}});
+		}
+		else {
+			const before = handle(names[index - 1]);
+			const box = await before.boundingBox();
+
+			await handle(names[index]).dragTo(before, {targetPosition: {x: 20, y: Math.max(1, Math.round((box ? box.height : 40) - 4))}});
+		}
+
+		await expect.poll(async () => (await current()).indexOf(names[index]), {timeout: CHANGE_TIMEOUT}).toBe(index);
+
+		await page.waitForTimeout(SETTLE);
+	}
+
+	await expect.poll(current, {message: 'the menu is not in the order the lesson lists', timeout: CHANGE_TIMEOUT}).toEqual(names);
+}
+
+/**
+ * Record a replication candidate before and after an action. See candidate()
+ * in screenshot.ts: it does nothing unless REPLICATE_DIR is set.
+ */
+function observed<A extends unknown[], R>(
+	verb: string,
+	action: (page: Page, ...args: A) => Promise<R>
+) {
+	return async (page: Page, ...args: A): Promise<R> => {
+		const what = `${verb} ${typeof args[0] === 'string' ? args[0] : ''}`;
+
+		await candidate(page, `before ${what}`);
+
+		const result = await action(page, ...args);
+
+		await candidate(page, `after ${what}`);
+
+		return result;
+	};
+}
+
+export const addComponent = observed('add', addComponentAction);
+export const attach = observed('attach', attachAction);
+export const choose = observed('choose', chooseAction);
+export const closeModal = observed('close', closeModalAction);
+export const download = observed('download', downloadAction);
+export const fill = observed('fill', fillAction);
+export const fragmentOption = observed('option', fragmentOptionAction);
+export const openFromPageTree = observed('tree', openFromPageTreeAction);
+export const openMenu = observed('open', openMenuAction);
+//
+// Publish in the page editor, checked by the editor closing. A publish that
+// did not happen still passed: the "page was created" message changed the
+// screen at the same moment, the next steps ran inside the editor, and the
+// exercise failed two steps later on something unrelated. The editor's
+// address carries p_l_mode=edit until the page is published.
+//
+async function pressChecked(page: Page, label: string, within?: string, icon?: string) {
+	const editing = () => /[?&]p_l_mode=edit\b/.test(page.url());
+
+	if ((label !== 'Publish') || !editing()) {
+		return pressAction(page, label, within, icon);
+	}
+
+	for (let attempt = 0; attempt < 2; attempt++) {
+		if (attempt === 0) {
+			await pressAction(page, label, within, icon);
+		}
+		else {
+			await page.getByRole('button', {exact: true, name: 'Publish'}).first().click({timeout: 5000}).catch(() => undefined);
+		}
+
+		const deadline = Date.now() + CHANGE_TIMEOUT * 2;
+
+		while ((Date.now() < deadline) && editing()) {
+			await page.waitForTimeout(300);
+		}
+
+		if (!editing()) {
+			await page.waitForTimeout(SETTLE);
+
+			return;
+		}
+	}
+
+	throw new Error('Publish was pressed, but the page editor stayed open: the page was not published');
+}
+
+export const press = observed('press', pressChecked);
+export const pressKeys = observed('keys', pressKeysAction);
+export const reload = observed('reload', reloadAction);
+export const reorderMenu = observed('reorder', reorderMenuAction);
+export const selectInEditor = observed('select', selectInEditorAction);
+export const toggle = observed('toggle', toggleAction);
+export const transfer = observed('transfer', transferAction);
